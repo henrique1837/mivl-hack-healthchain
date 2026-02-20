@@ -1,0 +1,55 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary: oklch(0.6 0.18 260);
+  --color-secondary: oklch(0.6 0.25 320);
+  --color-accent: oklch(0.8 0.15 150);
+  --color-background: oklch(0.15 0.05 260);
+  --color-surface: oklch(0.2 0.05 260);
+
+  --font-sans: "Outfit", sans-serif;
+}
+
+body {
+  background: var(--color-background);
+  color: white;
+  font-family: var(--font-sans);
+  min-height: 100vh;
+  margin: 0;
+}
+
+.glass {
+  background: rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 24px;
+}
+
+.gradient-text {
+  background: linear-gradient(to right, var(--color-primary), var(--color-secondary));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.btn-primary {
+  @apply px-6 py-3 rounded-2xl bg-primary text-white font-semibold transition-all;
+}
+
+.btn-primary:hover {
+  transform: scale(1.05);
+  box-shadow: 0 0 20px oklch(0.6 0.18 260 / 0.5);
+}
+
+.btn-primary:active {
+  transform: scale(0.95);
+}
+
+.card-hover {
+  @apply transition-all duration-300;
+}
+
+.card-hover:hover {
+  transform: translateY(-0.5rem);
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+}
