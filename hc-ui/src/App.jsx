@@ -255,7 +255,7 @@ function App() {
                 <h2 className="text-xl font-bold mb-6 flex items-center gap-2">
                   <span className="text-primary text-2xl">05</span> Incoming Requests
                 </h2>
-                <IncomingRequests mineProfile={profile} />
+                <IncomingRequests key={pubkey} mineProfile={profile} />
               </div>
             )}
 
@@ -265,7 +265,7 @@ function App() {
                 <h2 className="text-xl font-bold mb-6 flex items-center gap-2">
                   <span className="text-primary text-2xl">06</span> Requested Data
                 </h2>
-                <OutgoingRequests />
+                <OutgoingRequests key={pubkey} />
               </div>
             )}
 

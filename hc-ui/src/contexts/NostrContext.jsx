@@ -59,6 +59,18 @@ export const NostrProvider = ({ children }) => {
         }
     }, [isConnected, logoutNostr]);
 
+    // Auto-clear Nostr identity when the active BTC account ADDRESS changes (wallet switch).
+    // We track by address so that merely connecting (empty → address) does NOT trigger a reset.
+    const activeAddress = accounts?.[0]?.address ?? null;
+    const [lastAddress, setLastAddress] = useState(null);
+    useEffect(() => {
+        if (activeAddress && lastAddress && activeAddress !== lastAddress) {
+            console.log('[NostrContext] Wallet account changed — clearing Nostr identity', { from: lastAddress, to: activeAddress });
+            logoutNostr();
+        }
+        setLastAddress(activeAddress);
+    }, [activeAddress]); // eslint-disable-line
+
     const deriveNostrKey = async (signatureBase64) => {
         const signatureBytes = Buffer.from(signatureBase64, 'base64');
         const hash = await crypto.subtle.digest('SHA-256', signatureBytes);

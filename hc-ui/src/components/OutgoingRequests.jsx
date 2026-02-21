@@ -18,7 +18,7 @@ function OutgoingRequestCard({ request }) {
 
     // MIDL Executor hooks
     const { addTxIntention, txIntentions } = useAddTxIntention()
-    const { finalizeBTCTransaction, data: btcTxData } = useFinalizeBTCTransaction()
+    const { finalizeBTCTransactionAsync, isPending: isFinalizePending, data: btcTxData } = useFinalizeBTCTransaction()
     const { signIntentionAsync } = useSignIntention()
 
     const [status, setStatus] = useState('pending') // pending | intent | final | sign | broadcast | refunding | done | error
@@ -92,15 +92,16 @@ function OutgoingRequestCard({ request }) {
     }
 
     // 2. Finalize BTC
-    const handleFinalizeBTC = () => {
-        console.log('[OutgoingRequests] finalizeBTCTransaction called, txIntentions:', txIntentions.length)
+    const handleFinalizeBTC = async () => {
+        console.log('[OutgoingRequests] finalizeBTCTransactionAsync called, txIntentions:', txIntentions.length)
         setError(null)
         try {
-            finalizeBTCTransaction()
+            const result = await finalizeBTCTransactionAsync()
+            console.log('[OutgoingRequests] finalizeBTC result:', result?.tx?.id)
             setStatus('sign')
         } catch (e) {
             console.error('[OutgoingRequests] finalizeBTC error:', e)
-            setError(e.message)
+            setError(e.message || 'Failed to finalize BTC transaction')
         }
     }
 
@@ -207,8 +208,8 @@ function OutgoingRequestCard({ request }) {
                             1. Prepare Refund Intention {status !== 'pending' && '✓'}
                         </button>
 
-                        <button onClick={handleFinalizeBTC} disabled={status !== 'final'} className="w-full py-2 rounded-xl bg-white/5 border border-white/10 text-xs font-bold hover:bg-white/10 disabled:opacity-30">
-                            2. Calculate Gas & Finalize BTC {status !== 'pending' && status !== 'final' && '✓'}
+                        <button onClick={handleFinalizeBTC} disabled={status !== 'final' || isFinalizePending} className="w-full py-2 rounded-xl bg-white/5 border border-white/10 text-xs font-bold hover:bg-white/10 disabled:opacity-30">
+                            {isFinalizePending ? '⏳ Waiting for wallet…' : `2. Calculate Gas & Finalize BTC ${status !== 'pending' && status !== 'final' ? '✓' : ''}`}
                         </button>
 
                         <button onClick={handleSignIntentions} disabled={status !== 'sign' || isLoading} className="w-full py-2 rounded-xl bg-white/5 border border-white/10 text-xs font-bold hover:bg-white/10 disabled:opacity-30">

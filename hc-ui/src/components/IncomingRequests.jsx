@@ -19,7 +19,7 @@ function IncomingRequestCard({ request, privKey, pubkey, profile }) {
 
     // MIDL Executor hooks
     const { addTxIntention, txIntentions } = useAddTxIntention()
-    const { finalizeBTCTransaction, data: btcTxData } = useFinalizeBTCTransaction()
+    const { finalizeBTCTransactionAsync, isPending: isFinalizePending, data: btcTxData } = useFinalizeBTCTransaction()
     const { signIntentionAsync } = useSignIntention()
 
     const [status, setStatus] = useState('pending') // pending | intent | final | sign | broadcast | done | error
@@ -68,11 +68,11 @@ function IncomingRequestCard({ request, privKey, pubkey, profile }) {
     // 1. Prepare Claim Intention
     const handlePrepareClaim = async () => {
         if (!profile?.healthRecords?.length) {
-            setError("No health records to share")
+            setError('No health records to share with this requester.')
             return
         }
         if (!request.secret) {
-            setError("No secret provided by the requester. Cannot claim HTLC funds.")
+            setError('No secret in this request. The requester may have sent this before the fix was deployed.')
             return
         }
         setStatus('intent')
@@ -80,11 +80,17 @@ function IncomingRequestCard({ request, privKey, pubkey, profile }) {
         try {
             const secretHex = request.secret
             setSharedSecret(secretHex)
+            console.log('[IncomingRequests] Preparing claim intention:', {
+                lockId: request.lockId,
+                secretHex: secretHex?.slice(0, 10) + '...',
+                hasLockValid: isLockValid,
+            })
 
-            // Prepare the on-chain claim intention
+            // withdraw:true tells MIDL to bridge the EVM payout back to the provider's BTC wallet
             addTxIntention({
                 reset: true,
                 intention: {
+                    withdraw: true,
                     evmTransaction: {
                         to: HTLC_CONTRACT.address,
                         data: encodeFunctionData({
@@ -95,23 +101,26 @@ function IncomingRequestCard({ request, privKey, pubkey, profile }) {
                     },
                 },
             })
+            console.log('[IncomingRequests] Claim intention added, waiting for finalizeBTC')
             setStatus('final')
         } catch (e) {
-            console.error(e)
+            console.error('[IncomingRequests] handlePrepareClaim error:', e)
             setError(e.message || 'Failed to prepare claim')
+            setStatus('pending')
         }
     }
 
-    // 2. Finalize BTC — fire-and-forget; status advances via useEffect when btcTxData arrives
-    const handleFinalizeBTC = () => {
-        console.log('[IncomingRequests] finalizeBTCTransaction called, txIntentions:', txIntentions.length)
+    // 2. Finalize BTC — async so errors surface; status advances via useEffect when btcTxData arrives
+    const handleFinalizeBTC = async () => {
+        console.log('[IncomingRequests] finalizeBTCTransactionAsync called, txIntentions:', txIntentions.length)
         setError(null)
         try {
-            finalizeBTCTransaction()
+            const result = await finalizeBTCTransactionAsync()
+            console.log('[IncomingRequests] finalizeBTC result:', result?.tx?.id)
             // Status advances to 'sign' via useEffect when btcTxData populates
         } catch (e) {
             console.error('[IncomingRequests] finalizeBTC error:', e)
-            setError(e.message)
+            setError(e.message || 'Failed to finalize BTC transaction')
         }
     }
 
@@ -239,8 +248,8 @@ function IncomingRequestCard({ request, privKey, pubkey, profile }) {
                             1. Prepare Claim Intention {status !== 'pending' && '✓'}
                         </button>
 
-                        <button onClick={handleFinalizeBTC} disabled={status !== 'final'} className="w-full py-2 rounded-xl bg-white/5 border border-white/10 text-xs font-bold hover:bg-white/10 disabled:opacity-30">
-                            2. Calculate Gas & Finalize BTC {status !== 'pending' && status !== 'final' && '✓'}
+                        <button onClick={handleFinalizeBTC} disabled={status !== 'final' || isFinalizePending} className="w-full py-2 rounded-xl bg-white/5 border border-white/10 text-xs font-bold hover:bg-white/10 disabled:opacity-30">
+                            {isFinalizePending ? '⏳ Waiting for wallet…' : `2. Calculate Gas & Finalize BTC ${status !== 'pending' && status !== 'final' ? '✓' : ''}`}
                         </button>
 
                         <button onClick={handleSignIntentions} disabled={status !== 'sign' || isLoading} className="w-full py-2 rounded-xl bg-white/5 border border-white/10 text-xs font-bold hover:bg-white/10 disabled:opacity-30">
