@@ -61,8 +61,9 @@ function OutgoingRequestCard({ request }) {
         }
     })
 
-    const isLockActive = lockData && !lockData.claimed && !lockData.refunded
-    const lockExpiry = lockData ? new Date(Number(lockData.timelock) * 1000) : null
+    const lockExists = lockData && Number(lockData.timelock) > 0
+    const isLockActive = lockExists && !lockData.claimed && !lockData.refunded
+    const lockExpiry = lockExists ? new Date(Number(lockData.timelock) * 1000) : null
     const canRefund = isLockActive && Date.now() > Number(lockData.timelock) * 1000
 
     // 1. Prepare Refund Intention
@@ -92,11 +93,13 @@ function OutgoingRequestCard({ request }) {
 
     // 2. Finalize BTC
     const handleFinalizeBTC = () => {
+        console.log('[OutgoingRequests] finalizeBTCTransaction called, txIntentions:', txIntentions.length)
         setError(null)
         try {
             finalizeBTCTransaction()
             setStatus('sign')
         } catch (e) {
+            console.error('[OutgoingRequests] finalizeBTC error:', e)
             setError(e.message)
         }
     }
@@ -127,20 +130,23 @@ function OutgoingRequestCard({ request }) {
     // 4. Broadcast
     const handleBroadcast = async () => {
         if (!btcTxData) {
-            setError("Missing transaction data")
+            setError('Missing transaction data')
             return
         }
+        console.log('[OutgoingRequests] Broadcasting refund, btcTxData.tx.id:', btcTxData.tx.id)
+        console.log('[OutgoingRequests] Intentions signed:', txIntentions.map(i => !!i.signedEvmTransaction))
         setIsLoading(true)
         setError(null)
         try {
-            await publicClient?.sendBTCTransactions({
-                serializedTransactions: txIntentions.map(it => it.signedEvmTransaction),
+            const refundHashes = await publicClient?.sendBTCTransactions({
+                serializedTransactions: txIntentions.map(it => /** @type {`0x${string}`} */(it.signedEvmTransaction)),
                 btcTransaction: btcTxData.tx.hex,
             })
+            console.log('[OutgoingRequests] Refund broadcast hashes:', refundHashes)
             waitForTransaction({ txId: btcTxData.tx.id })
             setStatus('refunding')
         } catch (e) {
-            console.error(e)
+            console.error('[OutgoingRequests] Broadcast error:', e)
             setError(e.message || 'Failed to refund')
             setIsLoading(false)
             setStatus('error')

@@ -11,6 +11,7 @@ import { useWaitForTransaction } from "@midl/react";
 import { nip19 } from 'nostr-tools'
 import { useNostr } from '../contexts/NostrContext'
 import { HTLC_CONTRACT, encryptWithSecret } from '../utils/DataShareHTLC'
+import ChainGuard from './ChainGuard'
 
 function IncomingRequestCard({ request, privKey, pubkey, profile }) {
     const { sendEncryptedDM } = useNostr()
@@ -49,8 +50,10 @@ function IncomingRequestCard({ request, privKey, pubkey, profile }) {
         }
     })
 
-    const isLockValid = lockData && !lockData.claimed && !lockData.refunded
-    const lockExpiry = lockData ? new Date(Number(lockData.timelock) * 1000) : null
+    // timelock=0 means the slot is empty (lock not found for this lockId on-chain)
+    const lockExists = lockData && Number(lockData.timelock) > 0
+    const isLockValid = lockExists && !lockData.claimed && !lockData.refunded
+    const lockExpiry = lockExists ? new Date(Number(lockData.timelock) * 1000) : null
 
     // Reactively advance status when btcTxData arrives (wallet popup completes)
     useEffect(() => {
@@ -101,10 +104,13 @@ function IncomingRequestCard({ request, privKey, pubkey, profile }) {
 
     // 2. Finalize BTC — fire-and-forget; status advances via useEffect when btcTxData arrives
     const handleFinalizeBTC = () => {
+        console.log('[IncomingRequests] finalizeBTCTransaction called, txIntentions:', txIntentions.length)
         setError(null)
         try {
             finalizeBTCTransaction()
+            // Status advances to 'sign' via useEffect when btcTxData populates
         } catch (e) {
+            console.error('[IncomingRequests] finalizeBTC error:', e)
             setError(e.message)
         }
     }
@@ -112,20 +118,24 @@ function IncomingRequestCard({ request, privKey, pubkey, profile }) {
     // 3. Sign Intentions
     const handleSignIntentions = async () => {
         if (!btcTxData) {
-            setError("Please finalize BTC transaction first")
+            setError('Please finalize BTC transaction first')
             return
         }
+        console.log('[IncomingRequests] Signing intentions, btcTxData.tx.id:', btcTxData.tx.id)
         setIsLoading(true)
         setError(null)
         try {
             for (const intention of txIntentions) {
+                console.log('[IncomingRequests] Signing intention:', { hasSignedTx: !!intention.signedEvmTransaction })
                 await signIntentionAsync({
                     intention,
                     txId: btcTxData.tx.id,
                 })
             }
+            console.log('[IncomingRequests] All intentions signed')
             setStatus('broadcast')
         } catch (e) {
+            console.error('[IncomingRequests] Sign error:', e)
             setError(e.message)
         } finally {
             setIsLoading(false)
@@ -135,36 +145,38 @@ function IncomingRequestCard({ request, privKey, pubkey, profile }) {
     // 4. Broadcast Claim AND send encrypted data Nostr DM
     const handleBroadcastAndShare = async () => {
         if (!btcTxData || !sharedSecret) {
-            setError("Missing transaction data or shared secret")
+            setError('Missing transaction data or shared secret')
             return
         }
+        console.log('[IncomingRequests] Broadcasting claim, btcTxData.tx.id:', btcTxData.tx.id)
+        console.log('[IncomingRequests] Intentions signed:', txIntentions.map(i => !!i.signedEvmTransaction))
         setIsLoading(true)
         setError(null)
         try {
             // A. Broadcast claim tx
-            await publicClient?.sendBTCTransactions({
-                serializedTransactions: txIntentions.map(it => it.signedEvmTransaction),
+            const claimHashes = await publicClient?.sendBTCTransactions({
+                serializedTransactions: txIntentions.map(it => /** @type {`0x${string}`} */(it.signedEvmTransaction)),
                 btcTransaction: btcTxData.tx.hex,
             })
+            console.log('[IncomingRequests] Claim broadcast hashes:', claimHashes)
             waitForTransaction({ txId: btcTxData.tx.id })
 
             // B. Send encrypted data over Nostr
-            // Encrypt all records with the secret
             const encryptedPayload = await encryptWithSecret(
                 { healthRecords: profile.healthRecords, pubkey },
                 sharedSecret
             )
-
             const dmPayload = JSON.stringify({
                 type: 'data_access_response',
                 lockId: request.lockId,
                 encryptedPayload,
             })
+            console.log('[IncomingRequests] Sending encrypted Nostr DM to requester:', request.requesterPubkey)
             await sendEncryptedDM(request.requesterPubkey, dmPayload, request.lockId, true, null)
 
             setStatus('claiming')
         } catch (e) {
-            console.error(e)
+            console.error('[IncomingRequests] Broadcast/share error:', e)
             setError(e.message || 'Failed to share data and claim')
             setIsLoading(false)
             setStatus('error')
@@ -201,9 +213,12 @@ function IncomingRequestCard({ request, privKey, pubkey, profile }) {
 
             {lockData && (
                 <div className={`p-3 rounded-xl text-xs flex items-center gap-2 ${isLockValid ? 'bg-green-500/10 border border-green-500/20 text-green-400'
-                    : 'bg-red-500/10 border border-red-500/20 text-red-400'
+                    : lockExists ? 'bg-red-500/10 border border-red-500/20 text-red-400'
+                        : 'bg-yellow-500/10 border border-yellow-500/20 text-yellow-400'
                     }`}>
-                    {isLockValid ? '✅ Funds verified on-chain' : '❌ Lock invalid or already settled'}
+                    {isLockValid ? '✅ Funds verified on-chain'
+                        : lockExists ? '❌ Lock already claimed or refunded'
+                            : '⚠️ Lock not found on-chain (lockId may be wrong — EVM tx may not be confirmed yet)'}
                 </div>
             )}
 
