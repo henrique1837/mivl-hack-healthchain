@@ -3,6 +3,7 @@ import { MaestroSymphonyProvider, MempoolSpaceProvider } from "@midl/core";
 import "@nomicfoundation/hardhat-chai-matchers";
 import { midl, midlRegtest } from "@midl/executor";
 import "@nomicfoundation/hardhat-ethers";
+import "@nomicfoundation/hardhat-verify";
 import "@typechain/hardhat";
 import "dotenv";
 import { config as dotenvConfig } from "dotenv";
@@ -41,6 +42,21 @@ const config: HardhatUserConfig = {
       },
       chainId: midlRegtest.id,
     },
+  },
+  etherscan: {
+    apiKey: {
+      'regtest': 'empty'
+    },
+    customChains: [
+      {
+        network: "regtest",
+        chainId: 15001,
+        urls: {
+          apiURL: "https://blockscout.staging.midl.xyz/api",
+          browserURL: "https://blockscout.staging.midl.xyz"
+        }
+      }
+    ]
   },
   midl: {
     path: "deployments",

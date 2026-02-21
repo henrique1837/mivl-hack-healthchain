@@ -6,7 +6,7 @@ HealthDataSwap is a decentralized platform designed to put patients in control o
 
 Traditional health data is siloed and often inaccessible to the patients who own it. HealthDataSwap enables:
 1.  **Sovereign Identity**: Use your Bitcoin/EVM wallet as your HealthID.
-2.  **Privacy First**: All data is encrypted and stored on IPFS, with keys managed by the user.
+2.  **Privacy First**: All data is encrypted and stored on IPFS (to be implemented IPFS storage, using nostr only for this poc), with keys managed by the user.
 3.  **Atomic Swaps**: Providers and requesters exchange funds for data access trustlessly using Hashed Time-Lock Contracts (HTLCs).
 
 ## 🏗️ Architecture
@@ -30,6 +30,8 @@ To get the full stack running locally:
     npm install
     npx hardhat test
     ```
+
+    Deployment: https://blockscout.staging.midl.xyz/address/0x2cF31938497C52d196182b29fF7D64e5E3930E43
 
 2.  **UI**:
     ```bash
