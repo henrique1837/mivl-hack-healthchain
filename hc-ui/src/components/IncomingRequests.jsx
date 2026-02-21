@@ -285,7 +285,7 @@ export default function IncomingRequests({ mineProfile }) {
         if (!pubkey) return
         setIsLoading(true)
         try {
-            await subscribeToDMs('healthchain-v0-datashare', null)
+            await subscribeToDMs('healthchain-v1-datashare', null)
         } finally {
             setIsLoading(false)
         }

@@ -25,7 +25,7 @@ const TABS = [
 
 function App() {
   const { isConnected, accounts } = useAccounts()
-  const { connectWithMidl, pubkey, profile, isLoading: nostrLoading } = useNostr()
+  const { connectWithMidl, pubkey, profile, isLoading: nostrLoading, clearHealthRecords } = useNostr()
   const { disconnect } = useDisconnect()
   const myEvmAddress = useEVMAddress()
 
@@ -197,9 +197,24 @@ function App() {
                         </div>
                       </div>
                     ))}
-                    <button onClick={() => setActiveTab('add')} className="w-full py-3 border border-dashed border-white/10 rounded-xl text-white/40 hover:text-white hover:border-white/20 transition-all text-sm">
-                      ➕ Add Another Record
-                    </button>
+                    <div className="flex gap-2">
+                      <button onClick={() => setActiveTab('add')} className="flex-1 py-3 border border-dashed border-white/10 rounded-xl text-white/40 hover:text-white hover:border-white/20 transition-all text-sm">
+                        ➕ Add Another Record
+                      </button>
+                      <button
+                        onClick={async () => {
+                          if (window.confirm('Are you sure you want to permanently delete all health records from your profile?')) {
+                            await clearHealthRecords();
+                            setSuccess('🗑️ All records cleared!');
+                            setTimeout(() => setSuccess(null), 5000);
+                          }
+                        }}
+                        className="px-4 py-3 bg-red-500/10 border border-red-500/20 text-red-500 hover:bg-red-500/20 rounded-xl transition-all text-sm font-bold"
+                        title="Clear all records"
+                      >
+                        🗑️ Clear All
+                      </button>
+                    </div>
                   </div>
                 )}
                 {success && (

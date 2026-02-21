@@ -13,7 +13,7 @@ const RELAYS = [
     'wss://relay.snort.social'
 ];
 
-export const NOSTR_APP_TAG = 'healthchain-v0';
+export const NOSTR_APP_TAG = 'healthchain-v1';
 export const NOSTR_SHARE_DATA_OP_TAG = `${NOSTR_APP_TAG}-datashare`;
 export const NOSTR_SHARING_DATA_OP_TAG = `${NOSTR_APP_TAG}-datasharing`;
 export const FEEDBACK_GROUP_CHAT_ID = '3cf3df85c1ee58b712e7296c0d2ec66a68f9b9ccc846b63d2f830d974aa447cd';
@@ -302,6 +302,14 @@ export const NostrProvider = ({ children }) => {
         return newRecord;
     }, [pubkey, privKey, profile, updateProfile]);
 
+    /**
+     * Clear all health records from the user's Nostr profile.
+     */
+    const clearHealthRecords = useCallback(async () => {
+        if (!pubkey || !privKey) throw new Error("Not logged in to Nostr.");
+        await updateProfile({ healthRecords: [] });
+    }, [pubkey, privKey, updateProfile]);
+
     const sendEncryptedDM = useCallback(async (recipientPubkey, message, dataCid, sharing, originalCID) => {
         if (!pubkey || !privKey) throw new Error("Not logged in with private key.");
 
@@ -485,6 +493,7 @@ export const NostrProvider = ({ children }) => {
             generateAndConnectKeys,
             updateProfile,
             addHealthRecord,
+            clearHealthRecords,
             fetchProfileByWalletAddress,
             fetchAllProfiles,
             fetchProfileByPubkey,

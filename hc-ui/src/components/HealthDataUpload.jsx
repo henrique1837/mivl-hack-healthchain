@@ -108,7 +108,7 @@ export default function HealthDataUpload({ accounts, onSuccess }) {
                 created_at: Math.floor(Date.now() / 1000),
                 tags: [
                     ['C', cid],
-                    ['A', 'healthchain-v0-storage']
+                    ['A', 'healthchain-v1-storage']
                 ],
                 content: encryptedContent,
             };

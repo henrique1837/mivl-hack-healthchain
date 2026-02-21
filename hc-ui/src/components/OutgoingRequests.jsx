@@ -94,7 +94,7 @@ function OutgoingRequestCard({ request }) {
                     const cidFilter = {
                         kinds: [1],
                         authors: [providerPubkey],
-                        '#A': ['healthchain-v0-storage'],
+                        '#A': ['healthchain-v1-storage'],
                         '#C': [rec.cid]
                     };
                     const payloadEvents = await pool.querySync(RELAYS, cidFilter);
@@ -375,7 +375,7 @@ export default function OutgoingRequests() {
         if (!pubkey) return
         setIsLoading(true)
         try {
-            await subscribeToDMs('healthchain-v0-datashare', null)
+            await subscribeToDMs('healthchain-v1-datashare', null)
         } finally {
             setIsLoading(false)
         }
