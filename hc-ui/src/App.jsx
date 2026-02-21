@@ -32,21 +32,7 @@ function App() {
   const [success, setSuccess] = useState(null)
   const [activeTab, setActiveTab] = useState('records')
 
-  // derivingRef prevents double-triggering while the async derivation is in-flight
-  const derivingRef = React.useRef(false)
-
-  useEffect(() => {
-    if (!isConnected) {
-      // Wallet disconnected — reset the guard so next reconnect triggers fresh
-      derivingRef.current = false
-      return
-    }
-    const addr = accounts?.[0]?.address
-    if (addr && !pubkey && !derivingRef.current) {
-      derivingRef.current = true
-      connectWithMidl().finally(() => { derivingRef.current = false })
-    }
-  }, [isConnected, accounts?.[0]?.address, pubkey, connectWithMidl])
+  // derivingRef was removed as it's no longer needed for auto-login
 
   const healthRecords = profile?.healthRecords ?? []
 

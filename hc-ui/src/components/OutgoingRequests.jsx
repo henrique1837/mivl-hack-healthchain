@@ -28,12 +28,15 @@ function OutgoingRequestCard({ request }) {
 
     // Decrypt the payload received from the provider (if any)
     useEffect(() => {
+        console.log('[OutgoingRequests] Checking for response to decrypt. LockId:', request.lockId, 'HasResponse:', !!request.response, 'HasSecret:', !!request.secret);
         if (request.response?.encryptedPayload && request.secret) {
+            console.log('[OutgoingRequests] Attempting decryption of payload...', request.response.encryptedPayload.slice(0, 20) + '...');
             decryptWithSecret(request.response.encryptedPayload, request.secret)
                 .then(res => {
+                    console.log('[OutgoingRequests] Decryption successful!', res);
                     setDecryptedData(JSON.parse(res))
                 })
-                .catch(e => console.error("Failed to decrypt provider payload:", e))
+                .catch(e => console.error("[OutgoingRequests] Failed to decrypt provider payload:", e))
         }
     }, [request.response, request.secret])
 
@@ -292,12 +295,17 @@ export default function OutgoingRequests() {
                 if (msg.pubkey !== pubkey) {
                     try {
                         const decrypted = await decryptDM(msg)
-                        if (!decrypted) continue
+                        if (!decrypted) {
+                            console.log('[OutgoingRequests] Could not decrypt msg from', msg.pubkey);
+                            continue;
+                        }
                         const data = JSON.parse(decrypted)
+                        console.log('[OutgoingRequests] Parsed incoming DM:', data.type, 'lockId:', data.lockId);
                         if (data.type === 'data_access_response' && data.lockId) {
                             responsesMap[data.lockId] = { ...data, senderMsgId: msg.id }
+                            console.log('[OutgoingRequests] Stored response mapped for lockId:', data.lockId);
                         }
-                    } catch (e) { /* skip malformed */ }
+                    } catch (e) { console.error('[OutgoingRequests] error parsing incoming DM', e) }
                 }
             }
 
@@ -309,11 +317,13 @@ export default function OutgoingRequests() {
                     if (!decrypted) continue
                     const data = JSON.parse(decrypted)
                     if (data.type === 'outgoing_access_request') {
+                        const response = responsesMap[data.lockId] || null;
+                        console.log('[OutgoingRequests] Found our request lockId:', data.lockId, 'HasResponse:', !!response);
                         parsed.push({
                             ...data,
                             msgId: msg.id,
                             created_at: msg.created_at,
-                            response: responsesMap[data.lockId] || null
+                            response
                         })
                     }
                 } catch (e) { /* skip malformed */ }
