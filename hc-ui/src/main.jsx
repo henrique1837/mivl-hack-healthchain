@@ -3,20 +3,23 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.jsx'
 import { MidlProvider } from '@midl/react'
-import { WagmiMidlProvider } from "@midl/executor-react"
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { midlStore } from "./midlConfig"
-
-const queryClient = new QueryClient()
+import { QueryClientProvider } from '@tanstack/react-query'
+import { midlConfig, queryClient } from "./config";
+import { NostrProvider } from './contexts/NostrContext'
+import { SatoshiKitProvider } from "@midl/satoshi-kit";
+import { WagmiMidlProvider } from "@midl/executor-react";
+import "@midl/satoshi-kit/styles.css";
 
 createRoot(document.getElementById('root')).render(
-  <StrictMode>
-    <MidlProvider config={midlStore}>
-      <QueryClientProvider client={queryClient}>
-        <WagmiMidlProvider>
-          <App />
-        </WagmiMidlProvider>
-      </QueryClientProvider>
-    </MidlProvider>
-  </StrictMode>,
+  <MidlProvider config={midlConfig}>
+    <QueryClientProvider client={queryClient}>
+      <WagmiMidlProvider>
+        <SatoshiKitProvider>
+          <NostrProvider>
+            <App />
+          </NostrProvider>
+        </SatoshiKitProvider>
+      </WagmiMidlProvider>
+    </QueryClientProvider>
+  </MidlProvider>,
 )
