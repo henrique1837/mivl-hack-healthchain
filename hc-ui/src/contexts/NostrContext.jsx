@@ -327,7 +327,7 @@ export const NostrProvider = ({ children }) => {
         try {
             const { nip04 } = await import('nostr-tools');
             const otherPubkey = event.pubkey === pubkey
-                ? event.tags.find(t => t[0] === 'p' && t[1] !== pubkey)?.[1]
+                ? event.tags.find(t => t[0] === 'p')?.[1] // Get recipient from 'p' tag (can be self for backups)
                 : event.pubkey;
             if (!otherPubkey) return null;
             return await nip04.decrypt(privKey, otherPubkey, event.content);
