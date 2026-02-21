@@ -2,7 +2,7 @@
 import type { DeployFunction } from "hardhat-deploy/types";
 
 const deploy: DeployFunction = async ({ midl }) => {
-    console.log("--- Starting HealthChain Deployment Process ---");
+    console.log("--- Starting DataShareHTLC Deployment Process ---");
 
     await midl.initialize();
 
@@ -19,19 +19,19 @@ const deploy: DeployFunction = async ({ midl }) => {
     /**
      * Add the deploy contract transaction intention for HealthChain
      */
-    await midl.deploy("HealthChain", []); // Deploy "HealthChain" with no constructor arguments
+    await midl.deploy("DataShareHTLC", []); // Deploy "HealthChain" with no constructor arguments
 
     /**
      * Sends the BTC transaction and EVM transaction to the network
      */
     await midl.execute();
-    console.log("HealthChain contract deployment transaction executed.");
+    console.log("DataShareHTLC contract deployment transaction executed.");
 
     // After execution, you can get the deployed contract's address
-    const healthChainContract = await midl.get("HealthChain");
-    console.log(`HealthChain deployed at: ${healthChainContract.address}`);
+    const healthChainContract = await midl.get("DataShareHTLC");
+    console.log(`DataShareHTLC deployed at: ${healthChainContract.address}`);
 
-    console.log("--- HealthChain Deployment Complete ---");
+    console.log("--- DataShareHTLC Deployment Complete ---");
 
     // Optional: Provide verification command for the deployed contract
     console.log("\nVerification Command (after deployment is confirmed on chain):");

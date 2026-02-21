@@ -36,6 +36,7 @@
   },
   "dependencies": {
     "@midl/logger": "^3.0.2",
+    "chai": "^6.2.2",
     "viem": "npm:@midl/viem@2.45.0"
   }
 }
