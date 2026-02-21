@@ -3,17 +3,23 @@ import { useAddNetwork } from "@midl/react";
 function AddMidlNetwork() {
     const { addNetwork } = useAddNetwork();
 
-    const onAddNetwork = () => {
-        addNetwork({
-            connectorId: "xverse",
-            networkConfig: {
-                name: "MIDL Regtest",
-                network: "regtest",
-                rpcUrl: "https://rpc.staging.midl.xyz",
-                indexerUrl: "https://mempool.staging.midl.xyz",
-            },
-        });
-        alert("done")
+    const onAddNetwork = async () => {
+        try {
+            await addNetwork({
+                connectorId: "xverse",
+                networkConfig: {
+                    name: "MIDL Regtest",
+                    network: "regtest",
+                    rpcUrl: "https://rpc.staging.midl.xyz",
+                    indexerUrl: "https://mempool.staging.midl.xyz",
+                    explorerUrl: "https://blockscout.staging.midl.xyz",
+                },
+            });
+            alert("Network added! Please check your Xverse wallet to ensure MIDL Regtest is selected.");
+        } catch (e) {
+            console.error(e);
+            alert("Failed to add network: " + e.message);
+        }
     };
 
     return (

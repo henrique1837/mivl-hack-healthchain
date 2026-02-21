@@ -13,38 +13,7 @@ import { useNostr } from '../contexts/NostrContext'
 import { HTLC_CONTRACT } from '../utils/DataShareHTLC'
 import ChainGuard from './ChainGuard'
 
-// AES-GCM encrypt with a bytes32 hex secret as key
-async function encryptWithSecret(data, secretHex) {
-    const raw = secretHex.replace('0x', '')
-    const keyBytes = Uint8Array.from(raw.match(/.{1,2}/g).map(b => parseInt(b, 16)))
-    const aesKey = await crypto.subtle.importKey(
-        'raw', keyBytes, { name: 'AES-GCM' }, false, ['encrypt']
-    )
-    const iv = crypto.getRandomValues(new Uint8Array(12))
-    const encoded = new TextEncoder().encode(typeof data === 'string' ? data : JSON.stringify(data))
-    const cipherBuf = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, aesKey, encoded)
-    const combined = new Uint8Array(iv.byteLength + cipherBuf.byteLength)
-    combined.set(iv, 0)
-    combined.set(new Uint8Array(cipherBuf), iv.byteLength)
-    return btoa(String.fromCharCode(...combined))
-}
-
-// AES-GCM decrypt with a bytes32 hex secret as key
-async function decryptWithSecret(base64, secretHex) {
-    const raw = secretHex.replace('0x', '')
-    const keyBytes = Uint8Array.from(raw.match(/.{1,2}/g).map(b => parseInt(b, 16)))
-    const aesKey = await crypto.subtle.importKey(
-        'raw', keyBytes, { name: 'AES-GCM' }, false, ['decrypt']
-    )
-    const combined = Uint8Array.from(atob(base64), c => c.charCodeAt(0))
-    const iv = combined.slice(0, 12)
-    const ciphertext = combined.slice(12)
-    const plainBuf = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, aesKey, ciphertext)
-    return new TextDecoder().decode(plainBuf)
-}
-
-function IncomingRequestCard({ request, privKey, pubkey, profile }) {
-    const { sendEncryptedDM } = useNostr()
+function OutgoingRequestCard({ request }) {
     const publicClient = usePublicClient()
 
     // MIDL Executor hooks
@@ -52,13 +21,12 @@ function IncomingRequestCard({ request, privKey, pubkey, profile }) {
     const { finalizeBTCTransaction, data: btcTxData } = useFinalizeBTCTransaction()
     const { signIntentionAsync } = useSignIntention()
 
-    const [status, setStatus] = useState('pending') // pending | intent | final | sign | broadcast | done | error
+    const [status, setStatus] = useState('pending') // pending | intent | final | sign | broadcast | refunding | done | error
     const [error, setError] = useState(null)
-    const [sharedSecret, setSharedSecret] = useState(null) // the preimage the provider used
     const [isLoading, setIsLoading] = useState(false)
 
     // Verify the HTLC lock on-chain
-    const { data: lockData } = useReadContract({
+    const { data: lockData, refetch } = useReadContract({
         address: HTLC_CONTRACT.address,
         abi: HTLC_CONTRACT.abi,
         functionName: 'getLock',
@@ -70,6 +38,7 @@ function IncomingRequestCard({ request, privKey, pubkey, profile }) {
         mutation: {
             onSuccess: () => {
                 setIsLoading(false)
+                refetch()
                 setStatus('done')
             },
             onError: (err) => {
@@ -80,44 +49,15 @@ function IncomingRequestCard({ request, privKey, pubkey, profile }) {
         }
     })
 
-    const isLockValid = lockData && !lockData.claimed && !lockData.refunded
+    const isLockActive = lockData && !lockData.claimed && !lockData.refunded
     const lockExpiry = lockData ? new Date(Number(lockData.timelock) * 1000) : null
+    const canRefund = isLockActive && Date.now() > Number(lockData.timelock) * 1000
 
-    // Reactively advance status when btcTxData arrives (wallet popup completes)
-    useEffect(() => {
-        if (btcTxData && status === 'final') setStatus('sign')
-    }, [btcTxData]) // eslint-disable-line
-
-    // Reactively advance status when intentions get signed
-    useEffect(() => {
-        if (txIntentions[0]?.signedEvmTransaction && status === 'sign') setStatus('broadcast')
-    }, [txIntentions]) // eslint-disable-line
-
-    // 1. Prepare Claim Intention
-    const handlePrepareClaim = async () => {
-        if (!profile?.healthRecords?.length) {
-            setError("No health records to share")
-            return
-        }
+    // 1. Prepare Refund Intention
+    const handlePrepareRefund = () => {
         setStatus('intent')
         setError(null)
         try {
-            // Derive the secret (preimage) used for the provider's side
-            const rawKey = new Uint8Array(32)
-            const encoder = new TextEncoder()
-            const keyMaterial = await crypto.subtle.importKey('raw', privKey, { name: 'PBKDF2' }, false, ['deriveKey'])
-            const derived = await crypto.subtle.deriveKey(
-                { name: 'PBKDF2', salt: encoder.encode(request.lockId || 'default'), iterations: 100000, hash: 'SHA-256' },
-                keyMaterial,
-                { name: 'AES-GCM', length: 256 },
-                true,
-                ['encrypt']
-            )
-            const exportedKey = await crypto.subtle.exportKey('raw', derived)
-            const secretHex = '0x' + Array.from(new Uint8Array(exportedKey)).map(b => b.toString(16).padStart(2, '0')).join('')
-            setSharedSecret(secretHex)
-
-            // Prepare the on-chain claim intention
             addTxIntention({
                 reset: true,
                 intention: {
@@ -125,8 +65,8 @@ function IncomingRequestCard({ request, privKey, pubkey, profile }) {
                         to: HTLC_CONTRACT.address,
                         data: encodeFunctionData({
                             abi: HTLC_CONTRACT.abi,
-                            functionName: 'claim',
-                            args: [request.lockId, secretHex],
+                            functionName: 'refund',
+                            args: [request.lockId],
                         }),
                     },
                 },
@@ -134,15 +74,16 @@ function IncomingRequestCard({ request, privKey, pubkey, profile }) {
             setStatus('final')
         } catch (e) {
             console.error(e)
-            setError(e.message || 'Failed to prepare claim')
+            setError(e.message || 'Failed to prepare refund')
         }
     }
 
-    // 2. Finalize BTC — fire-and-forget; status advances via useEffect when btcTxData arrives
+    // 2. Finalize BTC
     const handleFinalizeBTC = () => {
         setError(null)
         try {
             finalizeBTCTransaction()
+            setStatus('sign')
         } catch (e) {
             setError(e.message)
         }
@@ -171,60 +112,58 @@ function IncomingRequestCard({ request, privKey, pubkey, profile }) {
         }
     }
 
-    // 4. Broadcast Claim AND send encrypted data Nostr DM
-    const handleBroadcastAndShare = async () => {
-        if (!btcTxData || !sharedSecret) {
-            setError("Missing transaction data or shared secret")
+    // 4. Broadcast
+    const handleBroadcast = async () => {
+        if (!btcTxData) {
+            setError("Missing transaction data")
             return
         }
         setIsLoading(true)
         setError(null)
         try {
-            // A. Broadcast claim tx
             await publicClient?.sendBTCTransactions({
                 serializedTransactions: txIntentions.map(it => it.signedEvmTransaction),
                 btcTransaction: btcTxData.tx.hex,
             })
             waitForTransaction({ txId: btcTxData.tx.id })
-
-            // B. Send encrypted data over Nostr
-            // Encrypt all records with the secret
-            const encryptedPayload = await encryptWithSecret(
-                { healthRecords: profile.healthRecords, pubkey },
-                sharedSecret
-            )
-
-            const dmPayload = JSON.stringify({
-                type: 'data_access_response',
-                lockId: request.lockId,
-                encryptedPayload,
-            })
-            await sendEncryptedDM(request.requesterPubkey, dmPayload, request.lockId, true, null)
-
-            setStatus('claiming')
+            setStatus('refunding')
         } catch (e) {
             console.error(e)
-            setError(e.message || 'Failed to share data and claim')
+            setError(e.message || 'Failed to refund')
             setIsLoading(false)
             setStatus('error')
         }
     }
 
-    const npub = request.requesterPubkey ? nip19.npubEncode(request.requesterPubkey) : '—'
+    const npub = request.providerPubkey ? nip19.npubEncode(request.providerPubkey) : '—'
 
     return (
         <div className="bg-black/20 border border-white/5 rounded-2xl p-5 space-y-4">
             <div className="flex items-start justify-between gap-3">
                 <div>
-                    <p className="text-sm font-semibold text-white">Access Request</p>
-                    <p className="text-xs text-white/30 font-mono mt-0.5">{npub.slice(0, 24)}…</p>
+                    <p className="text-sm font-semibold text-white">Outgoing Request</p>
+                    <p className="text-xs text-white/30 font-mono mt-0.5" title="Provider">To: {npub.slice(0, 24)}…</p>
                 </div>
-                <span className={`text-[10px] px-2 py-1 rounded-lg font-bold uppercase border ${status === 'done' ? 'bg-green-500/10 text-green-400 border-green-500/20'
-                    : status === 'error' ? 'bg-red-500/10 text-red-400 border-red-500/20'
-                        : 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20'
+                <span className={`text-[10px] px-2 py-1 rounded-lg font-bold uppercase border ${lockData?.claimed ? 'bg-green-500/10 text-green-400 border-green-500/20'
+                    : lockData?.refunded ? 'bg-gray-500/10 text-gray-400 border-gray-500/20'
+                        : isLockActive ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20'
+                            : 'bg-red-500/10 text-red-400 border-red-500/20'
                     }`}>
-                    {status}
+                    {lockData?.claimed ? 'Claimed by Provider' : lockData?.refunded ? 'Refunded' : isLockActive ? 'Active' : 'Unknown'}
                 </span>
+            </div>
+
+            <div className="bg-black/30 border border-white/5 rounded-xl p-4 space-y-2 text-xs">
+                {request.secret && (
+                    <div>
+                        <span className="text-white/30 uppercase text-[10px] block mb-0.5">Your Secret</span>
+                        <code className="text-accent break-all">{request.secret}</code>
+                    </div>
+                )}
+                <div>
+                    <span className="text-white/30 uppercase text-[10px] block mb-0.5">Hashlock</span>
+                    <code className="text-primary break-all">{request.hashlock}</code>
+                </div>
             </div>
 
             <div className="grid grid-cols-2 gap-2 text-xs">
@@ -234,33 +173,20 @@ function IncomingRequestCard({ request, privKey, pubkey, profile }) {
                 </div>
                 <div className="bg-black/30 rounded-xl p-3">
                     <span className="text-white/30 uppercase text-[10px] block mb-0.5">Lock Expires</span>
-                    <span className="text-white font-bold">{lockExpiry ? lockExpiry.toLocaleDateString() : '—'}</span>
+                    <span className="text-white font-bold">{lockExpiry ? lockExpiry.toLocaleString() : '—'}</span>
                 </div>
             </div>
-
-            {lockData && (
-                <div className={`p-3 rounded-xl text-xs flex items-center gap-2 ${isLockValid ? 'bg-green-500/10 border border-green-500/20 text-green-400'
-                    : 'bg-red-500/10 border border-red-500/20 text-red-400'
-                    }`}>
-                    {isLockValid ? '✅ Funds verified on-chain' : '❌ Lock invalid or already settled'}
-                </div>
-            )}
-
-            {status === 'done' && (
-                <div className="p-3 bg-green-500/10 border border-green-500/20 rounded-xl text-xs text-green-400">
-                    ✅ Data shared & funds claimed atomically!
-                </div>
-            )}
 
             {error && (
                 <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-xl text-xs text-red-400">{error}</div>
             )}
 
-            {(!['claiming', 'done', 'error'].includes(status) && isLockValid) && (
+            {canRefund && !['refunding', 'done'].includes(status) && (
                 <ChainGuard>
                     <div className="p-4 glass bg-primary/5 space-y-3 border-primary/20 rounded-xl">
-                        <button onClick={handlePrepareClaim} disabled={status !== 'pending' || txIntentions.length > 0} className="w-full py-2 rounded-xl bg-white/5 border border-white/10 text-xs font-bold hover:bg-white/10 disabled:opacity-30">
-                            1. Prepare Claim Intention {status !== 'pending' && '✓'}
+                        <p className="text-xs text-center text-white/50 mb-2">Reclaim Expired Funds:</p>
+                        <button onClick={handlePrepareRefund} disabled={status !== 'pending' || txIntentions.length > 0} className="w-full py-2 rounded-xl bg-white/5 border border-white/10 text-xs font-bold hover:bg-white/10 disabled:opacity-30">
+                            1. Prepare Refund Intention {status !== 'pending' && '✓'}
                         </button>
 
                         <button onClick={handleFinalizeBTC} disabled={status !== 'final'} className="w-full py-2 rounded-xl bg-white/5 border border-white/10 text-xs font-bold hover:bg-white/10 disabled:opacity-30">
@@ -268,30 +194,30 @@ function IncomingRequestCard({ request, privKey, pubkey, profile }) {
                         </button>
 
                         <button onClick={handleSignIntentions} disabled={status !== 'sign' || isLoading} className="w-full py-2 rounded-xl bg-white/5 border border-white/10 text-xs font-bold hover:bg-white/10 disabled:opacity-30">
-                            {isLoading && status === 'sign' ? 'Signing...' : `3. Sign Claim Intentions ${status === 'broadcast' ? '✓' : ''}`}
+                            {isLoading && status === 'sign' ? 'Signing...' : `3. Sign Refund Intentions ${status === 'broadcast' ? '✓' : ''}`}
                         </button>
 
-                        <button onClick={handleBroadcastAndShare} disabled={status !== 'broadcast' || isLoading} className="w-full py-3 rounded-xl bg-accent text-black font-extrabold text-sm hover:brightness-110 disabled:opacity-30 shadow-[0_0_20px_oklch(0.8_0.15_150_/_0.3)]">
-                            {isLoading && status === 'broadcast' ? 'Broadcasting & Waiting...' : '4. Broadcast Claim & Send Data'}
+                        <button onClick={handleBroadcast} disabled={status !== 'broadcast' || isLoading} className="w-full py-3 rounded-xl bg-red-500/20 text-red-400 border border-red-500/30 font-extrabold text-sm hover:brightness-110 disabled:opacity-30 shadow-[0_0_20px_oklch(0.8_0.15_150_/_0.3)]">
+                            {isLoading && status === 'broadcast' ? 'Broadcasting & Waiting...' : '4. Broadcast Refund'}
                         </button>
                     </div>
                 </ChainGuard>
             )}
 
-            {(status === 'claiming') && (
+            {(status === 'refunding') && (
                 <div className="flex items-center justify-center gap-2 py-3 text-white/50 text-sm">
                     <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                     </svg>
-                    Claiming funds on-chain...
+                    Executing refund on-chain...
                 </div>
             )}
         </div>
     )
 }
 
-export default function IncomingRequests({ mineProfile }) {
+export default function OutgoingRequests() {
     const { pubkey, privKey, encryptedMessages, subscribeToDMs, decryptDM } = useNostr()
     const [requests, setRequests] = useState([])
     const [isLoading, setIsLoading] = useState(true)
@@ -312,12 +238,14 @@ export default function IncomingRequests({ mineProfile }) {
     useEffect(() => {
         const parseMessages = async () => {
             const parsed = []
-            for (const msg of encryptedMessages) {
+            // Filter only self-DMs or messages where we are the sender
+            const sentByMe = encryptedMessages.filter(msg => msg.pubkey === pubkey);
+            for (const msg of sentByMe) {
                 try {
                     const decrypted = await decryptDM(msg)
                     if (!decrypted) continue
                     const data = JSON.parse(decrypted)
-                    if (data.type === 'data_access_request') {
+                    if (data.type === 'outgoing_access_request') {
                         parsed.push({
                             ...data,
                             msgId: msg.id,
@@ -326,16 +254,18 @@ export default function IncomingRequests({ mineProfile }) {
                     }
                 } catch (e) { /* skip malformed */ }
             }
+            // Sort by newest first
+            parsed.sort((a, b) => b.created_at - a.created_at)
             setRequests(parsed)
         }
         if (encryptedMessages?.length) parseMessages()
-    }, [encryptedMessages, decryptDM])
+    }, [encryptedMessages, decryptDM, pubkey])
 
     if (!pubkey) {
         return (
             <div className="flex flex-col items-center justify-center py-16 text-center gap-3">
                 <span className="text-4xl">🔐</span>
-                <p className="text-white/40 text-sm">Connect wallet to see incoming requests</p>
+                <p className="text-white/40 text-sm">Connect wallet to see requested data</p>
             </div>
         )
     }
@@ -344,7 +274,7 @@ export default function IncomingRequests({ mineProfile }) {
         <div className="space-y-4">
             <div className="flex items-center justify-between">
                 <span className="text-xs text-white/30 uppercase tracking-widest">
-                    {isLoading ? 'Loading...' : `${requests.length} pending request${requests.length !== 1 ? 's' : ''}`}
+                    {isLoading ? 'Loading...' : `${requests.length} requested item${requests.length !== 1 ? 's' : ''}`}
                 </span>
                 <button onClick={loadRequests} className="text-xs text-white/30 hover:text-white transition-colors px-3 py-1 rounded-lg hover:bg-white/5">
                     ↻ Refresh
@@ -354,17 +284,14 @@ export default function IncomingRequests({ mineProfile }) {
             {requests.length === 0 && !isLoading ? (
                 <div className="flex flex-col items-center justify-center py-16 border-2 border-dashed border-white/5 rounded-2xl text-center gap-3">
                     <span className="text-4xl">📭</span>
-                    <p className="text-white/30 text-sm">No incoming access requests yet.</p>
+                    <p className="text-white/30 text-sm">You haven't requested any data yet.</p>
                 </div>
             ) : (
                 <div className="space-y-3">
                     {requests.map(req => (
-                        <IncomingRequestCard
+                        <OutgoingRequestCard
                             key={req.msgId}
                             request={req}
-                            privKey={privKey}
-                            pubkey={pubkey}
-                            profile={mineProfile}
                         />
                     ))}
                 </div>

@@ -1,43 +1,34 @@
 import React, { useState, useEffect } from 'react'
 import {
   useAccounts,
-  useConnect,
   useDisconnect,
-  useWaitForTransaction
 } from "@midl/react"
-import {
-  useAddTxIntention,
-  useFinalizeBTCTransaction,
-  useSignIntention
-} from "@midl/executor-react";
 import { ConnectButton } from "@midl/satoshi-kit";
+import { useEVMAddress } from "@midl/executor-react";
 
-import { encodeFunctionData } from "viem"
-import { usePublicClient, useReadContract } from "wagmi"
 import { nip19 } from 'nostr-tools'
-import { HEALTH_CHAIN_CONTRACT } from './utils/HealthChain'
 
 import AddMidlNetwork from './components/AddMidlNetwork'
 import HealthDataUpload from './components/HealthDataUpload'
 import UsersDirectory from './components/UsersDirectory'
 import IncomingRequests from './components/IncomingRequests'
+import OutgoingRequests from './components/OutgoingRequests'
 import { useNostr } from './contexts/NostrContext'
 
 const TABS = [
   { id: 'records', label: '📋 My Records' },
   { id: 'add', label: '➕ Add Record' },
   { id: 'users', label: '👥 Users' },
-  { id: 'requests', label: '📨 Requests' },
+  { id: 'requests', label: '📥 Incoming Requests' },
+  { id: 'requested', label: '📤 Requested Data' },
 ]
 
 function App() {
   const { isConnected, accounts } = useAccounts()
   const { connectWithMidl, pubkey, profile, isLoading: nostrLoading } = useNostr()
   const { disconnect } = useDisconnect()
-  const publicClient = usePublicClient()
+  const myEvmAddress = useEVMAddress()
 
-  const [step, setStep] = useState(0)
-  const [loading, setLoading] = useState(false)
   const [success, setSuccess] = useState(null)
   const [activeTab, setActiveTab] = useState('records')
 
@@ -57,70 +48,6 @@ function App() {
     }
   }, [isConnected, accounts?.[0]?.address, pubkey, connectWithMidl])
 
-  const { addTxIntention, txIntentions } = useAddTxIntention()
-  const { finalizeBTCTransaction, data: btcTxData } = useFinalizeBTCTransaction()
-  const { signIntentionAsync } = useSignIntention()
-  const { waitForTransaction } = useWaitForTransaction({
-    mutation: {
-      onSuccess: () => {
-        setLoading(false)
-        setSuccess("Transaction Successful!")
-        setStep(0)
-      }
-    }
-  })
-
-  const { data: registeredKey } = useReadContract({
-    abi: HEALTH_CHAIN_CONTRACT.abi,
-    functionName: "getEncryptionPubKey",
-    address: HEALTH_CHAIN_CONTRACT.address,
-    args: [accounts?.[0]?.evmAddress],
-    query: { enabled: !!accounts?.[0]?.evmAddress }
-  })
-
-  const onAddIntention = () => {
-    if (!accounts?.[0]?.publicKey) return
-    addTxIntention({
-      reset: true,
-      intention: {
-        evmTransaction: {
-          to: HEALTH_CHAIN_CONTRACT.address,
-          data: encodeFunctionData({
-            abi: HEALTH_CHAIN_CONTRACT.abi,
-            functionName: "registerEncryptionPubKey",
-            args: [accounts?.[0].publicKey],
-          }),
-        },
-      },
-    })
-    setStep(1)
-  }
-
-  const onFinalizeBTC = () => { finalizeBTCTransaction(); setStep(2) }
-
-  const onSign = async () => {
-    if (!btcTxData) return
-    setLoading(true)
-    try {
-      for (const intention of txIntentions) {
-        await signIntentionAsync({ intention, txId: btcTxData.tx.id })
-      }
-      setStep(3)
-    } finally { setLoading(false) }
-  }
-
-  const onBroadcast = async () => {
-    if (!btcTxData) return
-    setLoading(true)
-    try {
-      await publicClient?.sendBTCTransactions({
-        serializedTransactions: txIntentions.map(it => it.signedEvmTransaction),
-        btcTransaction: btcTxData.tx.hex,
-      })
-      waitForTransaction({ txId: btcTxData.tx.id })
-    } catch (err) { console.error(err); setLoading(false) }
-  }
-
   const healthRecords = profile?.healthRecords ?? []
 
   return (
@@ -138,10 +65,13 @@ function App() {
             <ConnectButton />
           ) : (
             <div className="flex items-center gap-3">
-              <div className="glass px-4 py-2 flex flex-col items-end">
+              <div className="glass px-4 py-2 flex flex-col items-end gap-0.5">
                 <span className="text-[10px] text-white/40 uppercase tracking-widest">Connected</span>
-                <span className="text-sm font-mono text-primary">
-                  {accounts[0]?.evmAddress?.slice(0, 6)}…{accounts[0]?.evmAddress?.slice(-4)}
+                <span className="text-xs font-mono text-primary" title="EVM Address">
+                  EVM: {myEvmAddress ? `${myEvmAddress.slice(0, 6)}…${myEvmAddress.slice(-4)}` : '—'}
+                </span>
+                <span className="text-[10px] font-mono text-white/30" title={accounts[0]?.address}>
+                  BTC: {accounts[0]?.address?.slice(0, 10)}…
                 </span>
               </div>
               <button onClick={() => disconnect()} className="text-white/40 hover:text-white transition-colors" title="Disconnect">
@@ -172,9 +102,16 @@ function App() {
 
             {isConnected ? (
               <div className="space-y-4">
-                <div className="bg-black/20 rounded-xl p-4 border border-white/5">
-                  <span className="text-[10px] text-white/30 uppercase block mb-1">Wallet Public Key</span>
-                  <code className="text-xs break-all text-accent">{accounts[0]?.publicKey?.slice(0, 48)}…</code>
+                {/* Wallet Addresses */}
+                <div className="bg-black/20 rounded-xl p-4 border border-white/5 space-y-3">
+                  <div>
+                    <span className="text-[10px] text-white/30 uppercase block mb-1">🔗 EVM Address (MIDL)</span>
+                    <code className="text-xs break-all text-primary">{myEvmAddress || '—'}</code>
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-white/30 uppercase block mb-1">₿ Bitcoin Address</span>
+                    <code className="text-xs break-all text-accent">{accounts[0]?.address || '—'}</code>
+                  </div>
                 </div>
 
                 {/* Nostr Identity status */}
@@ -205,42 +142,9 @@ function App() {
                 )}
 
                 {pubkey && (
-                  <div className="grid grid-cols-2 gap-2">
-                    <div className="bg-black/10 rounded-xl p-3 border border-white/5 text-center">
-                      <span className="text-xl font-bold text-white">{healthRecords.length}</span>
-                      <span className="text-[10px] text-white/30 block uppercase">Records</span>
-                    </div>
-                    <div className="bg-black/10 rounded-xl p-3 border border-white/5 text-center">
-                      <span className="text-xl font-bold text-accent">{registeredKey ? '✓' : '—'}</span>
-                      <span className="text-[10px] text-white/30 block uppercase">On-chain</span>
-                    </div>
-                  </div>
-                )}
-
-                {registeredKey ? (
-                  <div className="flex flex-col items-center gap-2 p-5 bg-accent/5 rounded-2xl border border-accent/20">
-                    <div className="w-10 h-10 rounded-full bg-accent/20 flex items-center justify-center text-accent">
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
-                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                      </svg>
-                    </div>
-                    <span className="text-sm font-bold text-accent uppercase tracking-widest">Identity Verified</span>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    <button onClick={onAddIntention} disabled={step !== 0} className="w-full btn-primary disabled:opacity-30">
-                      1. Register Identity
-                    </button>
-                    {step >= 1 && (
-                      <div className="p-4 glass bg-primary/5 space-y-3 border-primary/20 animate-in fade-in slide-in-from-top-4">
-                        <p className="text-xs text-center text-white/50">Complete to broadcast</p>
-                        <button onClick={onFinalizeBTC} disabled={step !== 1} className="w-full py-2 rounded-xl bg-white/5 border border-white/10 text-xs font-bold hover:bg-white/10 disabled:opacity-30">2. Finalize BTC</button>
-                        <button onClick={onSign} disabled={step !== 2 || loading} className="w-full py-2 rounded-xl bg-white/5 border border-white/10 text-xs font-bold hover:bg-white/10 disabled:opacity-30">3. Sign</button>
-                        <button onClick={onBroadcast} disabled={step !== 3 || loading} className="w-full py-3 rounded-xl bg-accent text-black font-extrabold text-sm hover:brightness-110 disabled:opacity-30 shadow-[0_0_20px_oklch(0.8_0.15_150_/_0.3)]">
-                          {loading ? 'Broadcasting...' : '4. Broadcast'}
-                        </button>
-                      </div>
-                    )}
+                  <div className="bg-black/10 rounded-xl p-3 border border-white/5 text-center">
+                    <span className="text-xl font-bold text-white">{healthRecords.length}</span>
+                    <span className="text-[10px] text-white/30 block uppercase">Records</span>
                   </div>
                 )}
               </div>
@@ -349,9 +253,19 @@ function App() {
             {activeTab === 'requests' && (
               <div>
                 <h2 className="text-xl font-bold mb-6 flex items-center gap-2">
-                  <span className="text-primary text-2xl">05</span> Access Requests
+                  <span className="text-primary text-2xl">05</span> Incoming Requests
                 </h2>
                 <IncomingRequests mineProfile={profile} />
+              </div>
+            )}
+
+            {/* Outgoing Requests */}
+            {activeTab === 'requested' && (
+              <div>
+                <h2 className="text-xl font-bold mb-6 flex items-center gap-2">
+                  <span className="text-primary text-2xl">06</span> Requested Data
+                </h2>
+                <OutgoingRequests />
               </div>
             )}
 

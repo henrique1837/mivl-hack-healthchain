@@ -4,6 +4,7 @@ import { finalizeEvent, getPublicKey, generateSecretKey } from 'nostr-tools/pure
 import { nip19 } from 'nostr-tools';
 import { Buffer } from 'buffer';
 import { useSignMessage, useAccounts } from '@midl/react';
+import { useEVMAddress } from '@midl/executor-react';
 
 const RELAYS = [
     'wss://relay.damus.io',
@@ -22,6 +23,8 @@ const NostrContext = createContext(null);
 export const NostrProvider = ({ children }) => {
     const { isConnected, accounts } = useAccounts();
     const { signMessageAsync } = useSignMessage();
+    // Derive our own EVM address from connected BTC wallet (using MIDL's key derivation)
+    const myEvmAddress = useEVMAddress();
 
     const [pool] = useState(() => new SimplePool());
     const [privKey, setPrivKey] = useState(null);
@@ -62,32 +65,42 @@ export const NostrProvider = ({ children }) => {
         return new Uint8Array(hash);
     };
 
+    /**
+     * Parse a raw Nostr kind-0 event into a profile object.
+     * Health records and wallet address live in TAGS, not in the JSON content body.
+     */
+    const parseProfileEvent = (event) => {
+        if (!event) return null;
+        try {
+            const content = JSON.parse(event.content);
+            return {
+                ...content,
+                pubkey: event.pubkey,
+                created_at: event.created_at,
+                // Health records are stored as: ['health_record', cid, label, timestamp]
+                healthRecords: event.tags
+                    .filter(t => t[0] === 'health_record')
+                    .map(t => ({ cid: t[1], label: t[2] || '', timestamp: parseInt(t[3] || '0') })),
+                // EVM wallet address stored as: ['w', evmAddress]
+                walletAddress: event.tags.find(t => t[0] === 'w')?.[1] || null,
+                // Bitcoin address stored as: ['b', btcAddress]
+                btcAddress: event.tags.find(t => t[0] === 'b')?.[1] || null,
+                // Whether this profile has been registered with the app
+                hasAppTag: event.tags.some(t => t[0] === 'A' && t[1] === NOSTR_APP_TAG),
+            };
+        } catch (e) {
+            console.error('Failed to parse profile event', e);
+            return null;
+        }
+    };
+
     const fetchProfile = useCallback(async (pkHex) => {
         setIsLoading(true);
         try {
             const event = await pool.get(RELAYS, { kinds: [0], authors: [pkHex] });
-            if (event) {
-                try {
-                    const content = JSON.parse(event.content);
-                    const fetchedProfile = {
-                        ...content,
-                        pubkey: event.pubkey,
-                        created_at: event.created_at,
-                        // Extract health records from tags
-                        healthRecords: event.tags
-                            .filter(t => t[0] === 'health_record')
-                            .map(t => ({ cid: t[1], label: t[2] || '', timestamp: parseInt(t[3] || '0') })),
-                        walletAddress: event.tags.find(t => t[0] === 'w')?.[1] || null,
-                    };
-                    setProfile(fetchedProfile);
-                    setCachedProfiles(prev => ({ ...prev, [pkHex]: fetchedProfile }));
-                } catch (e) {
-                    console.error("Failed to parse profile JSON", e);
-                    setProfile(null);
-                }
-            } else {
-                setProfile(null);
-            }
+            const parsed = parseProfileEvent(event);
+            setProfile(parsed);
+            if (parsed) setCachedProfiles(prev => ({ ...prev, [pkHex]: parsed }));
         } catch (error) {
             console.error("Error fetching Nostr profile:", error);
             setProfile(null);
@@ -97,7 +110,7 @@ export const NostrProvider = ({ children }) => {
     }, [pool]);
 
     // Publish a minimal discovery profile so this user appears in UsersDirectory
-    const publishDiscoveryProfile = useCallback(async (pk, sk, walletAddr, existingProfile) => {
+    const publishDiscoveryProfile = useCallback(async (pk, sk, walletAddr, existingProfile, btcAddr) => {
         // Only publish if no profile exists yet, or if it's missing the app tag
         const content = JSON.stringify({
             name: existingProfile?.name || '',
@@ -106,6 +119,7 @@ export const NostrProvider = ({ children }) => {
         });
         const tags = [['A', NOSTR_APP_TAG]];
         if (walletAddr) tags.push(['w', walletAddr]);
+        if (btcAddr) tags.push(['b', btcAddr]);
         // Preserve existing health records
         for (const rec of (existingProfile?.healthRecords ?? [])) {
             tags.push(['health_record', rec.cid, rec.label || '', String(rec.timestamp || '')]);
@@ -142,17 +156,31 @@ export const NostrProvider = ({ children }) => {
             const pk = getPublicKey(sk);
             setPrivKey(sk);
             setPubkey(pk);
-            // Fetch existing profile first
-            let existingProfile = null;
+            // Fetch the existing raw event so we can preserve tags
+            let existingRawEvent = null;
             try {
-                const event = await pool.get(RELAYS, { kinds: [0], authors: [pk] });
-                if (event) existingProfile = JSON.parse(event.content);
+                existingRawEvent = await pool.get(RELAYS, { kinds: [0], authors: [pk] });
             } catch (_) { }
-            // Auto-publish discovery profile if missing app tag
-            const walletAddr = accounts[0]?.evmAddress || accounts[0]?.address || '';
-            await publishDiscoveryProfile(pk, sk, walletAddr, existingProfile);
-            // Now fetch + set full profile local state
-            await fetchProfile(pk);
+            const existingParsed = parseProfileEvent(existingRawEvent);
+            // Only publish a discovery profile if the A tag is missing,
+            // OR if the existing profile has no proper EVM address saved yet.
+            const validEvmAddress = myEvmAddress && myEvmAddress.startsWith('0x') && myEvmAddress !== '0x0000000000000000000000000000000000000000'
+                ? myEvmAddress : '';
+            const btcAddress = accounts[0]?.address || '';
+            const profileHasBadAddress = existingParsed?.hasAppTag && existingParsed?.walletAddress && !existingParsed.walletAddress.startsWith('0x');
+            if (!existingParsed?.hasAppTag || profileHasBadAddress) {
+                await publishDiscoveryProfile(pk, sk, validEvmAddress, existingParsed, btcAddress);
+            } else if (existingParsed?.hasAppTag && !existingParsed?.walletAddress && validEvmAddress) {
+                // Profile exists but is missing EVM address — update it
+                await publishDiscoveryProfile(pk, sk, validEvmAddress, existingParsed, btcAddress);
+            }
+            // Set local state from the authoritative relay data
+            if (existingParsed) {
+                setProfile(existingParsed);
+                setCachedProfiles(prev => ({ ...prev, [pk]: existingParsed }));
+            } else {
+                await fetchProfile(pk);
+            }
             setNostrReady(true);
             closeNostrLoginModal();
             return { pubkey: pk, privKey: sk };
@@ -346,17 +374,15 @@ export const NostrProvider = ({ children }) => {
 
     const fetchAllProfiles = useCallback(async () => {
         try {
-            const events = await pool.querySync(RELAYS, { kinds: [0], "#A": [NOSTR_APP_TAG] });
+            const events = await pool.querySync(RELAYS, { kinds: [0], '#A': [NOSTR_APP_TAG] });
             const profilesMap = new Map();
             for (const event of events) {
-                try {
-                    const content = JSON.parse(event.content);
-                    const currentProfile = { ...content, pubkey: event.pubkey, created_at: event.created_at };
-                    const existing = profilesMap.get(event.pubkey);
-                    if (!existing || event.created_at > existing.created_at) {
-                        profilesMap.set(event.pubkey, currentProfile);
-                    }
-                } catch (e) { console.error(e); }
+                const parsed = parseProfileEvent(event);
+                if (!parsed) continue;
+                const existing = profilesMap.get(event.pubkey);
+                if (!existing || event.created_at > existing.created_at) {
+                    profilesMap.set(event.pubkey, parsed);
+                }
             }
             const fetchedProfiles = Array.from(profilesMap.values());
             setCachedProfiles(prev => {
