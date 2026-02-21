@@ -13,7 +13,7 @@ Traditional health data is siloed and often inaccessible to the patients who own
 
 -   **[MIDL Network](https://midl.xyz)**: A high-performance Bitcoin scaling layer that provides the EVM environment for our `DataShareHTLC` contract.
 -   **[Nostr](https://nostr.com)**: Used as a decentralized signaling layer for discovering users, sharing encrypted access requests, returning decrypted health data pointers, and for this POC, mocking IPFS storage.
--   **IPFS (Planned)**: Decentralized storage for encrypted health record payloads. *(Note: For this Hackathon POC, IPFS is mocked by storing the AES-GCM encrypted payloads directly on Nostr as public Kind-1 events. In a production app, real IPFS is required to support large files like PDFs, X-Rays, and Photos).*
+-   **IPFS (Planned)**: Decentralized storage for encrypted health record payloads. *(Note: For this Hackathon POC, IPFS is mocked by storing the AES-GCM encrypted payloads directly on Nostr as public Kind-1 events - Kind can be changed in future, but for this PoC we kept kind 1 for simplicity. In a production app, real IPFS is required to support large files like PDFs, X-Rays, and Photos).*
 
 ## 📂 Project Structure
 
