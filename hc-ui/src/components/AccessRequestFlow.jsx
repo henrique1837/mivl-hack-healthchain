@@ -138,12 +138,19 @@ export default function AccessRequestFlow({ provider, requesterAccounts, onBack 
             }
             if (!hashlock) throw new Error("No hashlock available.")
 
+            // deposit.satoshis tells MIDL to transfer this amount of BTC from the wallet
+            // into the EVM side to back the payable lock() call.
+            // 1 BTC = 10^8 satoshis, so amount '0.001' → 100,000 satoshis.
+            const satoshis = Math.round(parseFloat(amount) * 1e8)
+            console.log('[AccessRequestFlow] Preparing intention with deposit:', satoshis, 'satoshis, value:', parseEther(amount).toString(), 'wei')
+
             addTxIntention({
                 reset: true,
                 intention: {
+                    deposit: { satoshis },
                     evmTransaction: {
                         to: HTLC_CONTRACT.address,
-                        value: parseEther(amount), // Pass bigint directly, viem/MIDL SDK will hex-encode it correctly
+                        value: parseEther(amount),
                         data: encodeFunctionData({
                             abi: HTLC_CONTRACT.abi,
                             functionName: 'lock',
