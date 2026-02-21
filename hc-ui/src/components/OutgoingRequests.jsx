@@ -9,8 +9,9 @@ import {
 } from "@midl/executor-react";
 import { useWaitForTransaction } from "@midl/react";
 import { nip19 } from 'nostr-tools'
-import { useNostr } from '../contexts/NostrContext'
+import { useNostr, NOSTR_APP_TAG, NOSTR_SHARING_DATA_OP_TAG } from '../contexts/NostrContext'
 import { HTLC_CONTRACT, decryptWithSecret } from '../utils/DataShareHTLC'
+import { decryptData as decryptHealthData } from './HealthDataUpload'
 import ChainGuard from './ChainGuard'
 
 function OutgoingRequestCard({ request }) {
@@ -26,19 +27,103 @@ function OutgoingRequestCard({ request }) {
     const [isLoading, setIsLoading] = useState(false)
     const [decryptedData, setDecryptedData] = useState(null)
 
-    // Decrypt the payload received from the provider (if any)
-    useEffect(() => {
-        console.log('[OutgoingRequests] Checking for response to decrypt. LockId:', request.lockId, 'HasResponse:', !!request.response, 'HasSecret:', !!request.secret);
-        if (request.response?.encryptedPayload && request.secret) {
-            console.log('[OutgoingRequests] Attempting decryption of payload...', request.response.encryptedPayload.slice(0, 20) + '...');
-            decryptWithSecret(request.response.encryptedPayload, request.secret)
-                .then(res => {
-                    console.log('[OutgoingRequests] Decryption successful!', res);
-                    setDecryptedData(JSON.parse(res))
-                })
-                .catch(e => console.error("[OutgoingRequests] Failed to decrypt provider payload:", e))
+    const { pubkey, pool, RELAYS, decryptDM } = useNostr()
+    const [isFetchingData, setIsFetchingData] = useState(false)
+
+    // Dynamically fetch and decrypt the payload from the provider when clicking the button
+    const handleFetchSharedData = async () => {
+        setIsFetchingData(true)
+        setError(null)
+        console.log('[OutgoingRequests] Fetching shared data for lockId:', request.lockId)
+        try {
+            // Find the provider's reply which is sent TO us (#p: pubkey)
+            // with OP tag NOSTR_SHARING_DATA_OP_TAG and C tag request.lockId
+            const filters = {
+                kinds: [4],
+                '#p': [pubkey],
+                '#A': [NOSTR_APP_TAG],
+                '#O': [NOSTR_SHARING_DATA_OP_TAG]
+            };
+
+            const rawEvents = await pool.querySync(RELAYS, filters);
+            console.log(`[OutgoingRequests] Found ${rawEvents.length} total NOSTR_SHARING_DATA_OP_TAG events directed to us.`);
+
+            const events = rawEvents.filter(e => {
+                const cTag = e.tags.find(t => t[0] === 'C')?.[1];
+                if (!cTag) return false;
+                return cTag.toLowerCase() === request.lockId.toLowerCase();
+            });
+            console.log(`[OutgoingRequests] Found ${events.length} events matching lockId: ${request.lockId}`);
+            if (rawEvents.length > 0 && events.length === 0) {
+                console.log('[OutgoingRequests] Example C tags from the events:', rawEvents.slice(0, 3).map(e => e.tags.find(t => t[0] === 'C')?.[1]));
+            }
+
+            if (events.length === 0) {
+                setError(`Provider has not responded with data yet (Found ${rawEvents.length} other replies).`);
+                setIsFetchingData(false);
+                return;
+            }
+
+            // We expect at least one, take the newest
+            const sorted = events.sort((a, b) => b.created_at - a.created_at);
+            const responseMsg = sorted[0];
+
+            console.log('[OutgoingRequests] Decrypting DM payload from provider...')
+            const decryptedString = await decryptDM(responseMsg);
+            if (!decryptedString) throw new Error('Failed to decrypt DM with Nostr keys');
+
+            const data = JSON.parse(decryptedString);
+            console.log('[OutgoingRequests] DM content parsed successfully', data.type);
+
+            if (data.type !== 'data_access_response' || !data.encryptedPayload) {
+                throw new Error('Invalid response format from provider');
+            }
+
+            // Decrypt the actual health records payload using the HTLC secret
+            console.log('[OutgoingRequests] Decrypting health records array with HTLC secret...')
+            const decryptedRecordsStr = await decryptWithSecret(data.encryptedPayload, request.secret);
+            const recordsJson = JSON.parse(decryptedRecordsStr);
+            const healthRecords = recordsJson.healthRecords || [];
+            const providerPubkey = recordsJson.pubkey;
+            console.log(`[OutgoingRequests] Successfully decrypted ${healthRecords.length} records! Loading full payloads...`);
+
+            // Now that we have the CIDs, we must fetch the actual encrypted payloads from Nostr
+            // (Simulating IPFS by fetching the provider's kind 1 storage events tagged with the CID)
+            const fullRecords = await Promise.all(healthRecords.map(async (rec) => {
+                try {
+                    const cidFilter = {
+                        kinds: [1],
+                        authors: [providerPubkey],
+                        '#A': ['healthchain-v0-storage'],
+                        '#C': [rec.cid]
+                    };
+                    const payloadEvents = await pool.querySync(RELAYS, cidFilter);
+
+                    if (payloadEvents.length === 0) {
+                        return { ...rec, error: 'Raw payload not found on Nostr (IPFS simulation missing). Was the record created before this update?' };
+                    }
+
+                    const payloadEvent = payloadEvents.sort((a, b) => b.created_at - a.created_at)[0];
+
+                    // The payload is AES-GCM encrypted. The key is derived from the provider's pubkey.
+                    const decryptedRecordPayload = await decryptHealthData(payloadEvent.content, providerPubkey);
+
+                    return { ...rec, fullData: decryptedRecordPayload };
+                } catch (err) {
+                    console.error('Error fetching/decrypting record', rec.cid, err);
+                    return { ...rec, error: 'Failed to load or decrypt' };
+                }
+            }));
+
+            setDecryptedData({ ...recordsJson, healthRecords: fullRecords });
+            setError(null);
+        } catch (e) {
+            console.error('[OutgoingRequests] handleFetchSharedData error:', e);
+            setError(e.message || 'Failed to fetch and decrypt shared data');
+        } finally {
+            setIsFetchingData(false)
         }
-    }, [request.response, request.secret])
+    }
 
     // Verify the HTLC lock on-chain
     const { data: lockData, refetch } = useReadContract({
@@ -236,24 +321,39 @@ function OutgoingRequestCard({ request }) {
                 </div>
             )}
 
+            {/* View Shared Data Button */}
+            {lockData?.claimed && !decryptedData && (
+                <button
+                    onClick={handleFetchSharedData}
+                    disabled={isFetchingData}
+                    className="w-full py-2 rounded-xl bg-green-500/20 text-green-400 border border-green-500/30 text-xs font-bold hover:bg-green-500/30 transition-colors mt-4">
+                    {isFetchingData ? 'Fetching Data from Relays...' : '🔓 Fetch Shared Data'}
+                </button>
+            )}
+
             {/* Display Decrypted Data */}
             {decryptedData && (
                 <div className="bg-green-500/10 border border-green-500/20 rounded-xl p-4 space-y-3 mt-4">
-                    <p className="text-sm font-bold text-green-400">✅ Data Received!</p>
+                    <p className="text-sm font-bold text-green-400">✅ Data Received & Decrypted!</p>
                     {decryptedData.healthRecords?.length > 0 ? (
                         <div className="space-y-2">
                             {decryptedData.healthRecords.map((rec, i) => (
                                 <div key={i} className="bg-black/40 border border-white/5 rounded-lg p-3">
                                     <p className="text-white/80 text-sm font-medium">{rec.label || 'Health Record'}</p>
                                     <p className="text-xs text-white/40 font-mono mt-1 break-all">CID: {rec.cid}</p>
-                                    <a
-                                        href={`https://ipfs.io/ipfs/${rec.cid}`}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="text-xs text-primary hover:text-primary-focus mt-2 inline-block"
-                                    >
-                                        View on IPFS ↗
-                                    </a>
+
+                                    {rec.error ? (
+                                        <p className="text-xs text-red-400 mt-2">Error: {rec.error}</p>
+                                    ) : rec.fullData ? (
+                                        <div className="mt-3 bg-black/50 p-3 rounded border border-white/5">
+                                            <p className="text-xs text-white/50 uppercase tracking-widest mb-2 font-bold">Decrypted Content:</p>
+                                            <pre className="text-xs text-white/70 whitespace-pre-wrap font-mono">
+                                                {JSON.stringify(rec.fullData, null, 2)}
+                                            </pre>
+                                        </div>
+                                    ) : (
+                                        <p className="text-xs text-yellow-400 mt-2">Loading payload...</p>
+                                    )}
                                 </div>
                             ))}
                         </div>

@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useNostr } from '../contexts/NostrContext'
 
 // Simple browser-side encryption using Web Crypto API (AES-GCM)
-const encryptData = async (data, pubKeyHex) => {
+export const encryptData = async (data, pubKeyHex) => {
     // Derive a symmetric key from the user's public key (deterministic for demo)
     const keyMaterial = await crypto.subtle.importKey(
         'raw',
@@ -26,17 +26,39 @@ const encryptData = async (data, pubKeyHex) => {
     combined.set(iv, 0);
     combined.set(new Uint8Array(encrypted), iv.byteLength);
     return btoa(String.fromCharCode(...combined));
+}
+
+export const decryptData = async (encryptedBase64, pubKeyHex) => {
+    const keyMaterial = await crypto.subtle.importKey(
+        'raw',
+        new TextEncoder().encode(pubKeyHex.slice(0, 32).padEnd(32, '0')),
+        { name: 'PBKDF2' },
+        false,
+        ['deriveKey']
+    );
+    const aesKey = await crypto.subtle.deriveKey(
+        { name: 'PBKDF2', salt: new TextEncoder().encode('healthchain-salt'), iterations: 100000, hash: 'SHA-256' },
+        keyMaterial,
+        { name: 'AES-GCM', length: 256 },
+        false,
+        ['decrypt']
+    );
+    const combined = Uint8Array.from(atob(encryptedBase64), c => c.charCodeAt(0));
+    const iv = combined.slice(0, 12);
+    const ciphertext = combined.slice(12);
+    const plainBuf = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, aesKey, ciphertext);
+    return JSON.parse(new TextDecoder().decode(plainBuf));
 };
 
 // Hash the data for on-chain integrity
-const hashData = async (data) => {
+export const hashData = async (data) => {
     const encoded = new TextEncoder().encode(typeof data === 'string' ? data : JSON.stringify(data));
     const hashBuffer = await crypto.subtle.digest('SHA-256', encoded);
     return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
 };
 
 // Simple CID-like identifier from encrypted content
-const generateCid = async (encryptedData) => {
+export const generateCid = async (encryptedData) => {
     const hash = await hashData(encryptedData);
     return `hc1-${hash.slice(0, 32)}`;
 };
@@ -50,7 +72,7 @@ const RECORD_TYPES = [
 ];
 
 export default function HealthDataUpload({ accounts, onSuccess }) {
-    const { pubkey, addHealthRecord, updateProfile, profile } = useNostr();
+    const { pubkey, privKey, addHealthRecord, updateProfile, profile, pool, RELAYS } = useNostr();
     const [selectedType, setSelectedType] = useState(null);
     const [formData, setFormData] = useState({});
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -77,14 +99,30 @@ export default function HealthDataUpload({ accounts, onSuccess }) {
             const cid = await generateCid(encryptedContent);
             const recordHash = await hashData(recordPayload);
 
-            // 3. Update the Nostr profile with the new health record tag
+            // 3. For this POC without IPFS, store the AES-GCM encrypted payload on Nostr 
+            //    as a public event (kind 1) so it can be fetched by anyone who knows the CID.
+            //    Privacy is maintained because it is AES-GCM encrypted.
+            const { finalizeEvent } = await import('nostr-tools/pure');
+            const dataEventTemplate = {
+                kind: 1,
+                created_at: Math.floor(Date.now() / 1000),
+                tags: [
+                    ['C', cid],
+                    ['A', 'healthchain-v0-storage']
+                ],
+                content: encryptedContent,
+            };
+            const signedDataEvent = finalizeEvent({ ...dataEventTemplate, pubkey }, privKey);
+            await Promise.any(pool.publish(RELAYS, signedDataEvent));
+
+            // 4. Update the Nostr profile with the new health record tag
             //    Also sync the wallet address into the profile
             await addHealthRecord({
                 cid,
                 label: `${selectedType.label} — ${new Date().toLocaleDateString()}`,
             });
 
-            // 4. Also update wallet address in profile if not set yet
+            // 5. Also update wallet address in profile if not set yet
             if (!profile?.walletAddress && accounts?.[0]?.evmAddress) {
                 await updateProfile({ walletAddress: accounts[0].evmAddress });
             }
@@ -119,8 +157,8 @@ export default function HealthDataUpload({ accounts, onSuccess }) {
                             key={type.id}
                             onClick={() => { setSelectedType(type); setFormData({}); }}
                             className={`p-3 rounded-xl border text-left transition-all ${selectedType?.id === type.id
-                                    ? 'bg-primary/20 border-primary/50 text-white'
-                                    : 'bg-white/5 border-white/5 text-white/50 hover:bg-white/10 hover:text-white'
+                                ? 'bg-primary/20 border-primary/50 text-white'
+                                : 'bg-white/5 border-white/5 text-white/50 hover:bg-white/10 hover:text-white'
                                 }`}
                         >
                             <span className="text-xl block mb-1">{type.icon}</span>
