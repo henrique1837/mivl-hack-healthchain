@@ -52,7 +52,7 @@ export default function UsersDirectory({ currentAccounts }) {
         <div className="space-y-4">
             <div className="flex items-center justify-between">
                 <span className="text-xs text-white/30 uppercase tracking-widest">
-                    {isLoading ? 'Loading profiles...' : `${profiles.length} HealthChain users`}
+                    {isLoading ? 'Loading profiles...' : `${profiles.length} HealthDataSwap users`}
                 </span>
                 <button onClick={load} className="text-xs text-white/30 hover:text-white transition-colors px-3 py-1 rounded-lg hover:bg-white/5">
                     ↻ Refresh
@@ -68,7 +68,7 @@ export default function UsersDirectory({ currentAccounts }) {
             ) : profiles.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-16 border-2 border-dashed border-white/5 rounded-2xl text-center gap-3">
                     <span className="text-4xl">👥</span>
-                    <p className="text-white/30 text-sm">No other HealthChain users found yet.</p>
+                    <p className="text-white/30 text-sm">No other HealthDataSwap users found yet.</p>
                 </div>
             ) : (
                 <div className="space-y-3">
@@ -140,8 +140,8 @@ export default function UsersDirectory({ currentAccounts }) {
                                         <button
                                             onClick={() => setRequestTarget(profile)}
                                             className={`w-full py-2.5 rounded-xl text-xs font-bold transition-all ${hasHashlock
-                                                    ? 'bg-primary/10 border border-primary/30 text-primary hover:bg-primary/20'
-                                                    : 'bg-white/5 border border-white/10 text-white/30 hover:bg-white/10 hover:text-white'
+                                                ? 'bg-primary/10 border border-primary/30 text-primary hover:bg-primary/20'
+                                                : 'bg-white/5 border border-white/10 text-white/30 hover:bg-white/10 hover:text-white'
                                                 }`}
                                         >
                                             {hasHashlock ? '🔐 Request Access (HTLC)' : '🔓 Request Access'}

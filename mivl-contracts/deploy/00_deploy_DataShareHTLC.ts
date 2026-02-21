@@ -1,4 +1,4 @@
-// deploy/00_deploy_HealthChain.ts
+// deploy/00_deploy_HealthDataSwap.ts
 import type { DeployFunction } from "hardhat-deploy/types";
 
 const deploy: DeployFunction = async ({ midl }) => {
@@ -19,7 +19,7 @@ const deploy: DeployFunction = async ({ midl }) => {
     /**
      * Add the deploy contract transaction intention for HealthChain
      */
-    await midl.deploy("DataShareHTLC", []); // Deploy "HealthChain" with no constructor arguments
+    await midl.deploy("DataShareHTLC", []); // Deploy "HealthDataSwap" with no constructor arguments
 
     /**
      * Sends the BTC transaction and EVM transaction to the network
@@ -38,5 +38,5 @@ const deploy: DeployFunction = async ({ midl }) => {
     console.log(`pnpm hardhat verify ${healthChainContract.address} --network regtest`);
 };
 
-deploy.tags = ["HealthChain"];
+deploy.tags = ["HealthDataSwap"];
 export default deploy;

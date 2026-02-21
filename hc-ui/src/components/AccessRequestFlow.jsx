@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { encodeFunctionData, parseEther } from 'viem'
+import { encodeFunctionData, parseEther, keccak256, decodeEventLog } from 'viem'
 import { usePublicClient } from 'wagmi'
 import {
     useAddTxIntention,
@@ -48,9 +48,48 @@ export default function AccessRequestFlow({ provider, requesterAccounts, onBack 
 
     const { waitForTransaction } = useWaitForTransaction({
         mutation: {
-            onSuccess: () => {
-                setIsLoading(false)
-                setStep(5) // Move to Notify Provider step
+            onSuccess: async () => {
+                console.log("[AccessRequestFlow] BTC transaction confirmed, fetching EVM receipt...");
+                try {
+                    // 1. Calculate the EVM tx hash from the signed intention
+                    const signedEvmTx = txIntentions[0].signedEvmTransaction;
+                    const evmTxHash = keccak256(signedEvmTx);
+                    console.log("[AccessRequestFlow] Expected EVM Tx Hash:", evmTxHash);
+
+                    // 2. Fetch the EVM transaction receipt
+                    const receipt = await publicClient.waitForTransactionReceipt({ hash: evmTxHash, confirmations: 1 });
+                    console.log("[AccessRequestFlow] EVM Receipt received:", receipt);
+
+                    // 3. Find the Locked event and extract lockId
+                    let newLockId = null;
+                    for (const log of receipt.logs) {
+                        try {
+                            const decoded = decodeEventLog({
+                                abi: HTLC_CONTRACT.abi,
+                                data: log.data,
+                                topics: log.topics
+                            });
+                            if (decoded.eventName === 'Locked') {
+                                newLockId = decoded.args.lockId;
+                                console.log("[AccessRequestFlow] Found LockId from logs:", newLockId);
+                                break;
+                            }
+                        } catch (e) {
+                            // ignore decoding errors for other logs
+                        }
+                    }
+
+                    if (!newLockId) throw new Error("Could not find lockId in transaction receipt.");
+
+                    // 4. Save it and move to next step
+                    setTxHash(newLockId); // txHash state variable holds the final lockId
+                    setIsLoading(false);
+                    setStep(5); // Move to Notify Provider step
+                } catch (e) {
+                    console.error("[AccessRequestFlow] EVM extraction failed:", e);
+                    setIsLoading(false);
+                    setError("Failed to extract lock from EVM: " + e.message);
+                }
             },
             onError: (err) => {
                 setIsLoading(false)
@@ -163,9 +202,8 @@ export default function AccessRequestFlow({ provider, requesterAccounts, onBack 
                 serializedTransactions: txIntentions.map(it => it.signedEvmTransaction),
                 btcTransaction: btcTxData.tx.hex,
             })
-            // Optimistic lockId derivation (txId)
-            setTxHash(btcTxData.tx.id)
             waitForTransaction({ txId: btcTxData.tx.id })
+            // Waiting... step 5 triggers on success and extracts the lockId
             // Waiting... step 5 triggers on success
         } catch (e) {
             console.error(e)
@@ -188,6 +226,7 @@ export default function AccessRequestFlow({ provider, requesterAccounts, onBack 
                 lockId,
                 txHash,
                 hashlock,
+                secret, // Passing HTLC preimage to provider so they can claim
                 amount,
                 requesterPubkey: myPubkey,
                 requesterEVM: requesterAccounts?.[0]?.evmAddress,

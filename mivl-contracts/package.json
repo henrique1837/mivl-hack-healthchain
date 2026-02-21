@@ -1,5 +1,5 @@
 {
-  "name": "midl-solidity-on-bitcoin-example",
+  "name": "health-data-swap-contracts",
   "version": "1.0.0",
   "scripts": {
     "deploy:proxies": "node utils/deployStarter.js proxies && hardhat deploy",

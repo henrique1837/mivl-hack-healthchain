@@ -114,7 +114,7 @@ export const NostrProvider = ({ children }) => {
         // Only publish if no profile exists yet, or if it's missing the app tag
         const content = JSON.stringify({
             name: existingProfile?.name || '',
-            about: existingProfile?.about || 'HealthChain user',
+            about: existingProfile?.about || 'HealthDataSwap user',
             picture: existingProfile?.picture || '',
         });
         const tags = [['A', NOSTR_APP_TAG]];

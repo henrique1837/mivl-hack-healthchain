@@ -1,66 +1,47 @@
-# HealthChain
+# HealthDataSwap Contracts ⚖️
 
-HealthChain is a decentralized platform for managing health identities and securely sharing encrypted medical records via atomic swaps on the MIDL network.
+The smart contract layer for HealthDataSwap, enabling trustless atomic swaps of data for value on the **MIDL Network**.
 
-## Features
+## 📄 Contract: `DataShareHTLC.sol`
 
-- **Decentralized HealthID**: Register and manage asymmetric encryption public keys linked to your EVM address.
-- **Secure Health Records**: Register encrypted health record pointers (IPFS CIDs) with integrity hashes.
-- **Atomic Data Swaps**: Buy and sell access to medical data using a secure, trustless hashlock-based escrow mechanism.
+The core of the platform is a Hashed Time-Lock Contract (HTLC) that ensures:
+1.  **Atomic Swap**: Requesters only pay if the Provider reveals the secret preimage (which also serves as the data decryption key).
+2.  **Trustless Escrow**: Funds are held by the contract and can either be claimed by the provider (with the secret) or refunded to the requester (after a timeout).
 
-## Prerequisites
+### Core Functions
 
-- **Node.js**: >= 20.0.0 (Recommended: 22.17.0)
-- **pnpm**: For package management.
-- **MIDL Regtest BTC**: Required for deployment and transaction fees on the staging network.
+-   `lock(address provider, bytes32 hashlock, uint256 timelockDuration)`: Requesters lock EVM funds for a specific provider.
+-   `claim(bytes32 lockId, bytes32 preimage)`: Providers reveal the secret to withdraw funds.
+-   `refund(bytes32 lockId)`: Requesters reclaim funds if the lock expires without a claim.
 
-## Getting Started
+## 🛠️ Development & Testing
 
-1. **Installation**:
-   ```bash
-   pnpm install
-   ```
+### Prerequisites
+- [MIDL Network](https://docs.midl.xyz) access.
+- Node.js >= 20.
 
-2. **Configuration**:
-   Copy the example environment file and add your mnemonic:
-   ```bash
-   cp .env.example .env
-   # Edit .env and set MNEMONIC="your mnemonic here"
-   ```
+### Installation
+```bash
+npm install
+```
 
-3. **Running Tests**:
-   Verify everything is working with the comprehensive test suite:
-   ```bash
-   pnpm hardhat test
-   ```
+### Running Tests
+The test suite validates the full HTLC lifecycle (Locking, Successful Claim, Wrong Preimage, Expiration, and Refund).
+```bash
+npx hardhat test
+```
 
-4. **Deployment**:
-   Deploy the HealthChain contract to the MIDL staging network:
-   ```bash
-   pnpm hardhat deploy
-   ```
+### Deployment
+To deploy to the MIDL Regtest network:
+1.  Update `hardhat.config.ts` with the MIDL RPC URL and your private key.
+2.  Run the deployment script:
+    ```bash
+    npx hardhat run scripts/deploy.ts --network midl
+    ```
 
-## Contract Overview (HealthChain.sol)
+## 🌐 Network Configuration (Regtest)
+- **Chain ID**: `15001`
+- **RPC URL**: `https://rpc.regtest.midl.xyz` (Example)
 
-### HealthID (Encryption Keys)
-- `registerEncryptionPubKey(string key)`: Link your public encryption key to your address.
-- `getEncryptionPubKey(address user)`: Retrieve a user's registered public key.
-
-### Health Records
-- `registerRecord(string cid, string hash)`: Store metadata for an encrypted record on IPFS.
-- `getRecord(uint256 id)`: (Owner only) Retrieve direct record details.
-
-### Atomic Swaps
-- `createOffer(uint256 recordId, uint256 price, bytes32 hashlock, uint256 expiration)`: Offer data for sale.
-- `payForOffer(uint256 offerId, string pubKey)`: Requester places funds in escrow.
-- `revealSecret(uint256 offerId, bytes32 secret)`: Owner reveals secret to claim funds and grant access.
-- `reclaimPayment(uint256 offerId)`: Requester reclaims funds if owner fails to fulfill before expiration.
-- `getAccessedRecordViaOffer(uint256 offerId)`: (Purchaser only) Access record data after successful swap.
-
-## Network Information (Staging)
-
-- **RPC URL**: `https://rpc.staging.midl.xyz`
-- **Mempool Explorer**: [https://mempool.staging.midl.xyz](https://mempool.staging.midl.xyz)
-- **Block Explorer**: [https://blockscout.staging.midl.xyz](https://blockscout.staging.midl.xyz)
-- **Rune Provider**: `https://runes.staging.midl.xyz`
-
+## 📜 License
+MIT

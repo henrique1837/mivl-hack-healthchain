@@ -10,38 +10,7 @@ import {
 import { useWaitForTransaction } from "@midl/react";
 import { nip19 } from 'nostr-tools'
 import { useNostr } from '../contexts/NostrContext'
-import { HTLC_CONTRACT } from '../utils/DataShareHTLC'
-import ChainGuard from './ChainGuard'
-
-// AES-GCM encrypt with a bytes32 hex secret as key
-async function encryptWithSecret(data, secretHex) {
-    const raw = secretHex.replace('0x', '')
-    const keyBytes = Uint8Array.from(raw.match(/.{1,2}/g).map(b => parseInt(b, 16)))
-    const aesKey = await crypto.subtle.importKey(
-        'raw', keyBytes, { name: 'AES-GCM' }, false, ['encrypt']
-    )
-    const iv = crypto.getRandomValues(new Uint8Array(12))
-    const encoded = new TextEncoder().encode(typeof data === 'string' ? data : JSON.stringify(data))
-    const cipherBuf = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, aesKey, encoded)
-    const combined = new Uint8Array(iv.byteLength + cipherBuf.byteLength)
-    combined.set(iv, 0)
-    combined.set(new Uint8Array(cipherBuf), iv.byteLength)
-    return btoa(String.fromCharCode(...combined))
-}
-
-// AES-GCM decrypt with a bytes32 hex secret as key
-async function decryptWithSecret(base64, secretHex) {
-    const raw = secretHex.replace('0x', '')
-    const keyBytes = Uint8Array.from(raw.match(/.{1,2}/g).map(b => parseInt(b, 16)))
-    const aesKey = await crypto.subtle.importKey(
-        'raw', keyBytes, { name: 'AES-GCM' }, false, ['decrypt']
-    )
-    const combined = Uint8Array.from(atob(base64), c => c.charCodeAt(0))
-    const iv = combined.slice(0, 12)
-    const ciphertext = combined.slice(12)
-    const plainBuf = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, aesKey, ciphertext)
-    return new TextDecoder().decode(plainBuf)
-}
+import { HTLC_CONTRACT, encryptWithSecret } from '../utils/DataShareHTLC'
 
 function IncomingRequestCard({ request, privKey, pubkey, profile }) {
     const { sendEncryptedDM } = useNostr()
@@ -99,22 +68,14 @@ function IncomingRequestCard({ request, privKey, pubkey, profile }) {
             setError("No health records to share")
             return
         }
+        if (!request.secret) {
+            setError("No secret provided by the requester. Cannot claim HTLC funds.")
+            return
+        }
         setStatus('intent')
         setError(null)
         try {
-            // Derive the secret (preimage) used for the provider's side
-            const rawKey = new Uint8Array(32)
-            const encoder = new TextEncoder()
-            const keyMaterial = await crypto.subtle.importKey('raw', privKey, { name: 'PBKDF2' }, false, ['deriveKey'])
-            const derived = await crypto.subtle.deriveKey(
-                { name: 'PBKDF2', salt: encoder.encode(request.lockId || 'default'), iterations: 100000, hash: 'SHA-256' },
-                keyMaterial,
-                { name: 'AES-GCM', length: 256 },
-                true,
-                ['encrypt']
-            )
-            const exportedKey = await crypto.subtle.exportKey('raw', derived)
-            const secretHex = '0x' + Array.from(new Uint8Array(exportedKey)).map(b => b.toString(16).padStart(2, '0')).join('')
+            const secretHex = request.secret
             setSharedSecret(secretHex)
 
             // Prepare the on-chain claim intention

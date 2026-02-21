@@ -1,17 +1,16 @@
 // DataShareHTLC contract ABI + address
 // Solidity equivalent (for reference):
-//
 // contract DataShareHTLC {
 //   struct Lock {
 //     address requester;   address provider;
-//     uint256 amount;      bytes32 hashlock;  // SHA256(secret)
+//     uint256 amount;      bytes32 hashlock;
 //     uint256 timelock;    bool claimed;      bool refunded;
 //   }
 //   mapping(bytes32 => Lock) public locks;
 //   function lock(address provider, bytes32 hashlock, uint256 timelockDuration)
-//     external payable returns (bytes32 lockId); // lockId = keccak256(msg.sender, provider, hashlock, nonce)
-//   function claim(bytes32 lockId, bytes32 preimage) external; // SHA256(preimage)==hashlock → pay provider
-//   function refund(bytes32 lockId) external;                  // expired → refund requester
+//     external payable returns (bytes32 lockId);
+//   function claim(bytes32 lockId, bytes32 preimage) external;
+//   function refund(bytes32 lockId) external;
 // }
 
 export const HTLC_CONTRACT = {
@@ -104,4 +103,32 @@ export const HTLC_CONTRACT = {
     ]
 };
 
+// AES-GCM encrypt with a bytes32 hex secret as key
+export async function encryptWithSecret(data, secretHex) {
+    const raw = secretHex.replace('0x', '')
+    const keyBytes = Uint8Array.from(raw.match(/.{1,2}/g).map(b => parseInt(b, 16)))
+    const aesKey = await crypto.subtle.importKey(
+        'raw', keyBytes, { name: 'AES-GCM' }, false, ['encrypt']
+    )
+    const iv = crypto.getRandomValues(new Uint8Array(12))
+    const encoded = new TextEncoder().encode(typeof data === 'string' ? data : JSON.stringify(data))
+    const cipherBuf = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, aesKey, encoded)
+    const combined = new Uint8Array(iv.byteLength + cipherBuf.byteLength)
+    combined.set(iv, 0)
+    combined.set(new Uint8Array(cipherBuf), iv.byteLength)
+    return btoa(String.fromCharCode(...combined))
+}
 
+// AES-GCM decrypt with a bytes32 hex secret as key
+export async function decryptWithSecret(base64, secretHex) {
+    const raw = secretHex.replace('0x', '')
+    const keyBytes = Uint8Array.from(raw.match(/.{1,2}/g).map(b => parseInt(b, 16)))
+    const aesKey = await crypto.subtle.importKey(
+        'raw', keyBytes, { name: 'AES-GCM' }, false, ['decrypt']
+    )
+    const combined = Uint8Array.from(atob(base64), c => c.charCodeAt(0))
+    const iv = combined.slice(0, 12)
+    const ciphertext = combined.slice(12)
+    const plainBuf = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, aesKey, ciphertext)
+    return new TextDecoder().decode(plainBuf)
+}

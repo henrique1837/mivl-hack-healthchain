@@ -10,7 +10,7 @@ import {
 import { useWaitForTransaction } from "@midl/react";
 import { nip19 } from 'nostr-tools'
 import { useNostr } from '../contexts/NostrContext'
-import { HTLC_CONTRACT } from '../utils/DataShareHTLC'
+import { HTLC_CONTRACT, decryptWithSecret } from '../utils/DataShareHTLC'
 import ChainGuard from './ChainGuard'
 
 function OutgoingRequestCard({ request }) {
@@ -24,6 +24,18 @@ function OutgoingRequestCard({ request }) {
     const [status, setStatus] = useState('pending') // pending | intent | final | sign | broadcast | refunding | done | error
     const [error, setError] = useState(null)
     const [isLoading, setIsLoading] = useState(false)
+    const [decryptedData, setDecryptedData] = useState(null)
+
+    // Decrypt the payload received from the provider (if any)
+    useEffect(() => {
+        if (request.response?.encryptedPayload && request.secret) {
+            decryptWithSecret(request.response.encryptedPayload, request.secret)
+                .then(res => {
+                    setDecryptedData(JSON.parse(res))
+                })
+                .catch(e => console.error("Failed to decrypt provider payload:", e))
+        }
+    }, [request.response, request.secret])
 
     // Verify the HTLC lock on-chain
     const { data: lockData, refetch } = useReadContract({
@@ -213,6 +225,33 @@ function OutgoingRequestCard({ request }) {
                     Executing refund on-chain...
                 </div>
             )}
+
+            {/* Display Decrypted Data */}
+            {decryptedData && (
+                <div className="bg-green-500/10 border border-green-500/20 rounded-xl p-4 space-y-3 mt-4">
+                    <p className="text-sm font-bold text-green-400">✅ Data Received!</p>
+                    {decryptedData.healthRecords?.length > 0 ? (
+                        <div className="space-y-2">
+                            {decryptedData.healthRecords.map((rec, i) => (
+                                <div key={i} className="bg-black/40 border border-white/5 rounded-lg p-3">
+                                    <p className="text-white/80 text-sm font-medium">{rec.label || 'Health Record'}</p>
+                                    <p className="text-xs text-white/40 font-mono mt-1 break-all">CID: {rec.cid}</p>
+                                    <a
+                                        href={`https://ipfs.io/ipfs/${rec.cid}`}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="text-xs text-primary hover:text-primary-focus mt-2 inline-block"
+                                    >
+                                        View on IPFS ↗
+                                    </a>
+                                </div>
+                            ))}
+                        </div>
+                    ) : (
+                        <p className="text-xs text-white/40">Provider returned an empty document list.</p>
+                    )}
+                </div>
+            )}
         </div>
     )
 }
@@ -238,7 +277,24 @@ export default function OutgoingRequests() {
     useEffect(() => {
         const parseMessages = async () => {
             const parsed = []
-            // Filter only self-DMs or messages where we are the sender
+            const responsesMap = {} // lockId -> data_access_response payload
+
+            // 1. First pass to find all data_access_responses
+            for (const msg of encryptedMessages) {
+                // Responses come from the provider (NOT from us)
+                if (msg.pubkey !== pubkey) {
+                    try {
+                        const decrypted = await decryptDM(msg)
+                        if (!decrypted) continue
+                        const data = JSON.parse(decrypted)
+                        if (data.type === 'data_access_response' && data.lockId) {
+                            responsesMap[data.lockId] = { ...data, senderMsgId: msg.id }
+                        }
+                    } catch (e) { /* skip malformed */ }
+                }
+            }
+
+            // 2. Second pass to find our original requests (self-DMs)
             const sentByMe = encryptedMessages.filter(msg => msg.pubkey === pubkey);
             for (const msg of sentByMe) {
                 try {
@@ -250,6 +306,7 @@ export default function OutgoingRequests() {
                             ...data,
                             msgId: msg.id,
                             created_at: msg.created_at,
+                            response: responsesMap[data.lockId] || null
                         })
                     }
                 } catch (e) { /* skip malformed */ }

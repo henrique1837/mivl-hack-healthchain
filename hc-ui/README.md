@@ -1,16 +1,45 @@
-# React + Vite
+# HealthDataSwap UI 📱
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+The frontend for the HealthDataSwap platform, providing a seamless interface for managing HealthIDs, recording medical data, and executing atomic swaps.
 
-Currently, two official plugins are available:
+## ✨ Key Features
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+-   **HealthID Dashboard**: Connect your Bitcoin/EVM wallet (via Xverse) and automatically sync with your **Nostr** profile.
+-   **Medical Records Management**: Store and encrypt links to your health data on IPFS.
+-   **Atomic Access Requests**: Request and pay for data access using a secure HTLC flow powered by the MIDL network.
+-   **Decrypted Data View**: Automatically decrypt and view medical records once a data swap is finalized.
 
-## React Compiler
+## 🛠️ Technology Stack
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+-   **Framework**: [React](https://reactjs.org/) + [Vite](https://vitejs.dev/)
+-   **Styling**: Vanilla CSS (Custom Glassmorphism Design)
+-   **Wallet/Web3**: 
+    -   [`@midl/executor-react`](https://docs.midl.xyz): MIDL SatoshiKit SDK for Bitcoin-backed EVM transactions.
+    -   [`wagmi`](https://wagmi.sh) & [`viem`](https://viem.sh): For EVM contract interactions.
+-   **Communication**: [`nostr-tools`](https://github.com/nbd-wtf/nostr-tools) for decentralized p2p signaling and coordination.
 
-## Expanding the ESLint configuration
+## 🚀 Development
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+### Prerequisites
+- Node.js >= 20
+- Xverse Wallet browser extension (configured for MIDL Regtest)
+
+### Setup
+1.  **Install dependencies**:
+    ```bash
+    npm install
+    ```
+2.  **Environment Variables**:
+    Create a `.env` file or use defaults in `config.jsx`. Ensure the `HTLC_CONTRACT` address matches your deployment.
+3.  **Run Dev Server**:
+    ```bash
+    npm run dev
+    ```
+
+## 🏗️ Folder Structure
+-   `/src/components`: UI components including the `AccessRequestFlow` and `ChainGuard`.
+-   `/src/contexts`: `NostrContext` for managing decentralized identity and DMs.
+-   `/src/utils`: Contract ABIs and shared encryption utilities.
+
+## 📜 License
+MIT

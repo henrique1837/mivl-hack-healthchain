@@ -56,7 +56,7 @@ function App() {
       {/* Header */}
       <header className="flex justify-between items-center mb-16">
         <div>
-          <h1 className="text-4xl font-extrabold gradient-text tracking-tight">HealthChain</h1>
+          <h1 className="text-4xl font-extrabold gradient-text tracking-tight">HealthDataSwap</h1>
           <p className="text-white/60 mt-1">Decentralized Health Records on Bitcoin</p>
         </div>
         <div className="flex items-center gap-3">
@@ -243,7 +243,7 @@ function App() {
             {activeTab === 'users' && (
               <div>
                 <h2 className="text-xl font-bold mb-6 flex items-center gap-2">
-                  <span className="text-primary text-2xl">04</span> HealthChain Users
+                  <span className="text-primary text-2xl">04</span> HealthDataSwap Users
                 </h2>
                 <UsersDirectory currentAccounts={accounts} />
               </div>
